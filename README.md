@@ -1,2 +1,2 @@
 # Measure Impulse Response
-This is a repository for Measuring Impulse Response. https://hariya-korg.github.io/MeasureImpulseResponse/
+This is a repository for Measure Impulse Response. https://hariya-korg.github.io/MeasureImpulseResponse/
