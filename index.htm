@@ -1,0 +1,65 @@
+<!DOCTYPE HTML>
+<html>
+
+<head>
+    <meta charset='utf-8'></meta>
+    <title>Measure Impulse Response</title>
+    <link type="text/css" rel="stylesheet" href="style.css"></link>
+    <script type='text/javascript'>
+        (function(){
+            function onDOMContentLoaded() {
+                var status = document.getElementById('status');
+                var button = document.getElementById('button');
+                var timer = null;
+                status.innerHTML = 'Initialized';
+                button.innerHTML = 'Measure';
+                button.value = false;
+                button.addEventListener('click', function(event) {
+                    var value = this.value == 'false';
+                    if (value) {
+                        onStart();
+                    } else {
+                        onStop();
+                    }
+                    this.value = value;
+                }, false);
+
+                function onStart() {
+                    status.innerHTML = 'Measuring...';
+                    button.innerHTML = 'Stop';
+
+                    /* write down process */
+                    timer = setTimeout(onFinish, 2000);
+                }
+
+                function onStop() {
+                    status.innerHTML = 'Interrupted';
+                    button.innerHTML = 'Measure';
+
+                    /* write down process */
+                    if (timer) {
+                        clearTimeout(timer);
+                    }
+                }
+
+                function onFinish() {
+                    status.innerHTML = 'Finished';
+                    button.innerHTML = 'Measure';
+                    button.value = false;
+
+                    /* write down process */
+                    timer = null;
+                }
+            }
+
+            window.addEventListener('DOMContentLoaded', onDOMContentLoaded, false);
+        })();
+    </script>
+</head>
+
+<body>
+    <button id='button'></button>
+    <p id='status'></p>
+</body>
+
+</html>
