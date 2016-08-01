@@ -5,6 +5,7 @@
     <meta charset='utf-8'></meta>
     <title>Measure Impulse Response</title>
     <link type='text/css' rel='stylesheet' href='style.css'></link>
+    <script type="text/javascript" src="fft.js"></script>
     <script type='text/javascript'>
         (function(){
             function onDOMContentLoaded() {
@@ -29,9 +30,23 @@
                     button.innerHTML = 'Stop';
 
                     /* write down process */
-                    timer = setTimeout(onFinish, 2000);
-                }
+                    // timer = setTimeout(onFinish, 2000);
+                    var N = 65536 ;
+                    var freqr = new Array(N);
+                    var freqi = new Array(N);
+                    //var Log_SS= new Array(N);
 
+                    var J = 4 ;
+                    var a =J*Math.PI/(N/2)*Math.log(N/2);
+
+                    for (var k=1 ; k<=N/2 ; k++){
+                        freqr[k] = Math.sqrt(1/k)*Math.cos(a*k*Math.log(k));
+                        freqi[k] = Math.sqrt(1/k)*Math.sin(a*k*Math.log(k));
+                    }
+                    var x = new FFTNayukis(N);
+                    x.ifft(freqr,freqi);
+                    document.write("ok");
+}
                 function onStop() {
                     status.innerHTML = 'Interrupted';
                     button.innerHTML = 'Measure';
