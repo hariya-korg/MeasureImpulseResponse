@@ -99,6 +99,38 @@ var myArrayBuffer = audioCtx.createBuffer(channels, N, audioCtx.sampleRate);
                     /* write down process */
                     timer = null;
                 }
+
+                function drawGraph(array) {
+                    var width = window.innerWidth * 0.8;
+                    var height = window.innerHeight * 0.8;
+                    var center = height * 0.4;
+                    var canvas = document.getElementById('graph');
+                    canvas.setAttribute('width', width);
+                    canvas.setAttribute('height', height);
+
+                    var length = array.length;
+                    var unit = width / (length - 1.0);
+
+                    var canvasCtx = canvas.getContext('2d');
+                    canvasCtx.clearRect(0.0, 0.0, width, height);
+                    canvasCtx.strokeStyle = 'rgb(0, 0, 0)';
+                    canvasCtx.lineWidth	= 2.0;
+                    canvasCtx.lineJoin	= 'round';
+                    canvasCtx.beginPath();
+                    canvasCtx.moveTo(width, center * (1.0 - array[(length - 1)|0]));
+                    for (var index = (length - 2)|0; index >=0; index = (index - 1)|0) {
+                        canvasCtx.lineTo(unit * index, center * (1.0 - array[index<<1>>1]));
+                    }
+                    canvasCtx.stroke();
+                }
+
+                array = new Float32Array(5);
+                array[0] = -1.0;
+                array[1] = 0.0;
+                array[2] = 0.75;
+                array[3] = 1.0;
+                array[4] = -1.0;
+                drawGraph(array);
             }
 
             window.addEventListener('DOMContentLoaded', onDOMContentLoaded, false);
@@ -109,6 +141,7 @@ var myArrayBuffer = audioCtx.createBuffer(channels, N, audioCtx.sampleRate);
 <body>
     <button id='button'></button>
     <p id='status'></p>
+    <canvas id='graph'></canvas>
 </body>
 
 </html>
