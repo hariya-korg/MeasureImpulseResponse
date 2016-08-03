@@ -43,25 +43,41 @@
 
                     // pinktsp(N, n, freqr, freqi, freqr2);
                     //soundplay(freqr2);
-                    
-                    navigator.getUserMedia = navigator.getUserMedia ||
-                             navigator.webkitGetUserMedia ||
-                             navigator.mozGetUserMedia;
+                    navigator.getUserMedia = ( navigator.getUserMedia ||
+                    navigator.webkitGetUserMedia ||
+                    navigator.mozGetUserMedia ||
+                    navigator.msGetUserMedia);
 
-                    if (navigator.getUserMedia) {
-                        navigator.getUserMedia({ audio: true, video: false },
-                            function(stream) {
-                            },
-                            function(err) {
-                                console.log("The following error occurred: " + err.name);
-                            }
-                        );
-                    } else {
-                        console.log("getUserMedia not supported");
+                    //↓↓↓書き途中↓↓↓
+
+                    navigator.getUserMedia ({ audio:true }, function(stream) {
+                        var audioCtx = new AudioContext();
+                        var source = audioCtx.createBufferSource(stream);
+                        var scriptNode = audioCtx.createScriptProcessor(4096, 1, 1);
+                        // Give the node a function to process audio events
+                        scriptNode.onaudioprocess = function(audioProcessingEvent) {
+                            // The input buffer is the song we loaded earlier
+                            var inputBuffer = audioProcessingEvent.inputBuffer;
+
+                            // The output buffer contains the samples that will be modified and played
+                            var outputBuffer = audioProcessingEvent.outputBuffer;
+
+                            // Loop through the output channels (in this case there is only one)
+                            for (var channel = 0; channel < outputBuffer.numberOfChannels; channel++) {
+                                var inputData = inputBuffer.getChannelData(channel);
+                                var outputData = outputBuffer.getChannelData(channel);
+                           //var source = audioCtx.createMediaStreamSource(stream)
+                           //source.connect(scriptNode);
+                    //  var context = new webkitAudioContext();
+                    //  var source = context.createMediaStreamSource(stream);
+                        source.connect(scriptNode);
+                        scriptNode.connect(audioCtx.destination);
                     }
                 }
+                 }, function(err){ alert("miss") });
 
-
+                 //↑↑↑書き途中↑↑↑
+                }
                 function onStop() {
                     status.innerHTML = 'Interrupted';
                     button.innerHTML = 'Measure';
@@ -95,7 +111,7 @@
                     freqi[0] = 0;
 
                     var x = new FFTNayukis(N);
-                    x.ifft(freqr,freqi);
+                    fftn.ifft(freqr,freqi);
 
                     var C =Math.round(N/2-J/2*(1+(1/Math.log(N/2))));
                     var D=1;
@@ -148,8 +164,8 @@
                 }
                 function ifilter(freqr,ifreqr,ifreqi){
                     var freqi = new Float32Array(N);
-                    var x = new FFTNayukis(N);
-                    x.fft(freqr,freqi);
+                    var fftn = new FFTNayukis(N);
+                    fftn.fft(freqr,freqi);
                     var J = Math.round(N/4*n)*2 ;
                     var a =J*Math.PI/(N/2)/Math.log(N/2);
                     for (var k=0; k<=N/2; k++) {
@@ -163,7 +179,7 @@
                      ifreqr[0]=1.0;
                      ifreqi[0]=0;
 
-                    x.ifft(ifreqr,ifreqi);
+                    fftn.ifft(ifreqr,ifreqi);
                     normalize(ifreqr);
                     soundplay(ifreqr);
                     drawGraph(ifreqr);
@@ -206,9 +222,8 @@
                     canvasCtx.lineJoin	= 'round';
                     canvasCtx.beginPath();
                     canvasCtx.moveTo(width, center);
-                    for (var index = (length - 2)|0; index >=0; index = (index - 1)|0) {
-                        canvasCtx.lineTo(unit * index, center);
-                    }
+                    canvasCtx.lineTo(0, center);
+
                     canvasCtx.stroke();
                 }
             }
