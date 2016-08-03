@@ -25,25 +25,49 @@
                     this.value = value;
                 }, false);
 
+                N=65536;
+                n=1;
+
+                var freqr = new Float32Array(N);
+                var freqi = new Float32Array(N);
+                var freqr2 = new Float32Array(N);
+                var ifreqr = new Float32Array(N);
+                var ifreqi = new Float32Array(N);
+
                 function onStart() {
                     status.innerHTML = 'Measuring...';
                     button.innerHTML = 'Stop';
 
                     /* write down process */
                     // timer = setTimeout(onFinish, 2000);
-                    var N = 65536 ;
-                    var freqr = new Float32Array(N);
-                    var freqi = new Float32Array(N);
-                    var freqr2 = new Float32Array(N);
 
-                    var n=2; //n>=2
-                    var J = Math.round((N/n)/2)*2 ;
+                    pinktsp(N, n, freqr, freqi, freqr2);
+                    soundplay(freqr2);
+                }
+                function onStop() {
+                    status.innerHTML = 'Interrupted';
+                    button.innerHTML = 'Measure';
+                    /* write down process */
+                    ifilter(freqr,ifreqr,ifreqi);
+                    if (timer) {
+                        clearTimeout(timer);
+                    }
+                }
+                function onFinish() {
+                    status.innerHTML = 'Finished';
+                    button.innerHTML = 'Measure';
+                    button.value = false;
+
+                    /* write down process */
+                    timer = null;
+                }
+                function pinktsp(N, n, freqr, freqi, freqr2){
+                    var J = Math.round(N/4*n)*2 ;
                     var a =J*Math.PI/(N/2)/Math.log(N/2);
 
                     for (var k=1 ; k<=N/2 ; k++){
                         freqr[k] = Math.sqrt(1/k)*Math.cos(-a*k*Math.log(k));
                         freqi[k] = Math.sqrt(1/k)*Math.sin(-a*k*Math.log(k));
-
                     }
                     for (var k=N/2+1 ; k<N ; k++){
                         freqr[k] = freqr[N-k];
@@ -55,18 +79,9 @@
                     var x = new FFTNayukis(N);
                     x.ifft(freqr,freqi);
 
-                    var max = Math.max.apply(null,freqr);
-                    var min = Math.abs(Math.min.apply(null,freqr));
-                    if (max<min)
-                        max = min ;
-
-                    for (var l=0 ; l<N ; l++){
-                        freqr[l]=freqr[l]/max;
-                    }
-
                     var C =Math.round(N/2-J/2*(1+(1/Math.log(N/2))));
-
-                    for (var q=1 ; q<20 ; q++){
+                    var D=1;
+                    for (var q=1 ; q<10000 ; q++){
                         if (D === 0) { break; }
 
                         for (var n=0 ; n<C ; n++){
@@ -76,33 +91,19 @@
                             freqr2[m]=freqr[m-C];
                         }
 
-                        var sample = 5000;
-                        var ex = new Float32Array(sample*2);
-                        for (var s=0 ; s<sample ; s++){
-                            ex[s]=freqr2[N-sample+s];
-                            ex[s+sample]=freqr2[s];
-                        }
-
+                        var sample = 50;
                         var D=sample-1;
                         for (var l=1 ; l<sample ; l++){
-                            if(ex[l]<ex[l-1])
-                                D = sample-l-1;
+                             if(freqr2[N-sample+l]<freqr2[N-sample+l-1])
+                             D = sample-l-1;
                         }
                         C=C+D;
                     }
-
-                    // var x = new FFTNayukis(N);
-                    // x.fft(freqr,freqi);
-                    // var ifreqr = new Float32Array(N);
-                    // var ifreqi = new Float32Array(N);
-                    // for (var k=0; k<=N/2; k++) {
-                    //  ifreqr[k] = freqr[k]*freqi[k]*Math.sqrt(k)*Math.cos(a*k*Math.log(k));
-                    //  ifreqi[k] = freqi[k]*Math.sqrt(k)*Math.cos(a*k*Math.log(k));
-                    // }
-                    // x.ifft(ifreqr,ifreqi);
-
-
-
+                    normalize(freqr2);
+                    drawGraph(freqr2);
+                    console.log(freqr2,D);
+                }
+                function soundplay(array){
                     var audioCtx = new AudioContext;
                     var channels = 1;
                     // AudioContextのサンプルレートで2秒間の空のステレオバッファを生成する
@@ -114,48 +115,51 @@
                         for (var i = 0; i < N; i++) {
                             // Math.random()は[0; 1.0]である
                             // 音声は[-1.0; 1.0]である必要がある
-                            nowBuffering[i] = freqr2[i];
+                            nowBuffering[i] = array[i];
                             // nowBuffering[i] = Math.random() * 2 - 1;
                         }
-                    }
-
-                    // AudioBufferSourceNodeを得る
+                    }                // AudioBufferSourceNodeを得る
                     // これはAudioBufferを再生するときに使うAudioNodeである
                     var source = audioCtx.createBufferSource();
                     // AudioBufferSourceNodeにバッファを設定する
                     source.buffer = myArrayBuffer;
                     // AudioBufferSourceNodeを出力先に接続すると音声が聞こえるようになる
                     source.connect(audioCtx.destination);
-
                     // 音源の再生を始める
                     source.start();
-
-                    drawGraph(freqr2);
-
-                    console.log(freqr2,D);
                 }
+                function ifilter(freqr,ifreqr,ifreqi){
+                    var freqi = new Float32Array(N);
+                    var x = new FFTNayukis(N);
+                    x.fft(freqr,freqi);
+                    var J = Math.round(N/4*n)*2 ;
+                    var a =J*Math.PI/(N/2)/Math.log(N/2);
+                    for (var k=0; k<=N/2; k++) {
+                     ifreqr[k] = Math.sqrt(k)*(freqr[k]*Math.cos(a*k*Math.log(k))-freqi[k]*Math.sin(a*k*Math.log(k)));
+                     ifreqi[k] = Math.sqrt(k)*(freqr[k]*Math.sin(a*k*Math.log(k))+freqi[k]*Math.cos(a*k*Math.log(k)));
+                    }
+                    for (var k=N/2+1 ; k<N ; k++){
+                        ifreqr[k] = ifreqr[N-k];
+                        ifreqi[k] = -ifreqi[N-k];
+                    }
+                     ifreqr[0]=1.0;
+                     ifreqi[0]=0;
 
-
-                function onStop() {
-                    status.innerHTML = 'Interrupted';
-                    button.innerHTML = 'Measure';
-
-                    /* write down process */
-
-                    if (timer) {
-                        clearTimeout(timer);
+                    x.ifft(ifreqr,ifreqi);
+                    normalize(ifreqr);
+                    soundplay(ifreqr);
+                    drawGraph(ifreqr);
+                    console.log(ifreqr);
+                }
+                function normalize(array){
+                    var max = Math.max.apply(null,array);
+                    var min = Math.abs(Math.min.apply(null,array));
+                    if (max<min)
+                        max = min ;
+                    for (var l=0 ; l<array.length ; l++){
+                        array[l]=array[l]/max;
                     }
                 }
-
-                function onFinish() {
-                    status.innerHTML = 'Finished';
-                    button.innerHTML = 'Measure';
-                    button.value = false;
-
-                    /* write down process */
-                    timer = null;
-                }
-
                 function drawGraph(array) {
                     var width = window.innerWidth * 0.8;
                     var height = window.innerHeight * 0.8;
@@ -170,7 +174,7 @@
                     var canvasCtx = canvas.getContext('2d');
                     canvasCtx.clearRect(0.0, 0.0, width, height);
                     canvasCtx.strokeStyle = 'rgb(0, 0, 0)';
-                    canvasCtx.lineWidth	= 2.0;
+                    canvasCtx.lineWidth	= 1;
                     canvasCtx.lineJoin	= 'round';
                     canvasCtx.beginPath();
                     canvasCtx.moveTo(width, center * (1.0 - array[(length - 1)|0]));
@@ -178,9 +182,17 @@
                         canvasCtx.lineTo(unit * index, center * (1.0 - array[index<<1>>1]));
                     }
                     canvasCtx.stroke();
+
+                    canvasCtx.strokeStyle = 'rgb(0, 0, 255)';
+                    canvasCtx.lineWidth	= 1;
+                    canvasCtx.lineJoin	= 'round';
+                    canvasCtx.beginPath();
+                    canvasCtx.moveTo(width, center);
+                    for (var index = (length - 2)|0; index >=0; index = (index - 1)|0) {
+                        canvasCtx.lineTo(unit * index, center);
+                    }
+                    canvasCtx.stroke();
                 }
-
-
             }
 
             window.addEventListener('DOMContentLoaded', onDOMContentLoaded, false);
