@@ -41,14 +41,32 @@
                     /* write down process */
                     // timer = setTimeout(onFinish, 2000);
 
-                    pinktsp(N, n, freqr, freqi, freqr2);
-                    soundplay(freqr2);
+                    // pinktsp(N, n, freqr, freqi, freqr2);
+                    //soundplay(freqr2);
+                    
+                    navigator.getUserMedia = navigator.getUserMedia ||
+                             navigator.webkitGetUserMedia ||
+                             navigator.mozGetUserMedia;
+
+                    if (navigator.getUserMedia) {
+                        navigator.getUserMedia({ audio: true, video: false },
+                            function(stream) {
+                            },
+                            function(err) {
+                                console.log("The following error occurred: " + err.name);
+                            }
+                        );
+                    } else {
+                        console.log("getUserMedia not supported");
+                    }
                 }
+
+
                 function onStop() {
                     status.innerHTML = 'Interrupted';
                     button.innerHTML = 'Measure';
                     /* write down process */
-                    ifilter(freqr,ifreqr,ifreqi);
+                //    ifilter(freqr,ifreqr,ifreqi);
                     if (timer) {
                         clearTimeout(timer);
                     }
