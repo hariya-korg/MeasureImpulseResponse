@@ -27,21 +27,23 @@
 
                 N=65536;
                 n=1;
+                latency  = 4096;
 
-                var freqr = new Float32Array(N);
-                var freqi = new Float32Array(N);
-                var freqr2 = new Float32Array(N);
+
                 var ifreqr = new Float32Array(N);
                 var ifreqi = new Float32Array(N);
+                var recordData = new Float32Array(N*2);
 
                 function onStart() {
                     status.innerHTML = 'Measuring...';
                     button.innerHTML = 'Stop';
-
+                    var freqr = new Float32Array(N);
+                    var freqi = new Float32Array(N);
+                    var freqr2 = new Float32Array(N);
                     /* write down process */
                     // timer = setTimeout(onFinish, 2000);
 
-                    // pinktsp(N, n, freqr, freqi, freqr2);
+                     pinktsp(N, n, freqr, freqi, freqr2);
                     //soundplay(freqr2);
                     navigator.getUserMedia = ( navigator.getUserMedia ||
                     navigator.webkitGetUserMedia ||
@@ -52,37 +54,59 @@
 
                     navigator.getUserMedia ({ audio:true }, function(stream) {
                         var audioCtx = new AudioContext();
-                        var source = audioCtx.createBufferSource(stream);
-                        var scriptNode = audioCtx.createScriptProcessor(4096, 1, 1);
+                        var source = audioCtx.createMediaStreamSource(stream)
+                        //var source = audioCtx.createBufferSource();
+                        var scriptNode = audioCtx.createScriptProcessor(latency);
                         // Give the node a function to process audio events
+                        var s=0;
                         scriptNode.onaudioprocess = function(audioProcessingEvent) {
                             // The input buffer is the song we loaded earlier
                             var inputBuffer = audioProcessingEvent.inputBuffer;
-
                             // The output buffer contains the samples that will be modified and played
                             var outputBuffer = audioProcessingEvent.outputBuffer;
-
                             // Loop through the output channels (in this case there is only one)
                             for (var channel = 0; channel < outputBuffer.numberOfChannels; channel++) {
                                 var inputData = inputBuffer.getChannelData(channel);
                                 var outputData = outputBuffer.getChannelData(channel);
-                           //var source = audioCtx.createMediaStreamSource(stream)
-                           //source.connect(scriptNode);
-                    //  var context = new webkitAudioContext();
-                    //  var source = context.createMediaStreamSource(stream);
-                        source.connect(scriptNode);
-                        scriptNode.connect(audioCtx.destination);
-                    }
-                }
-                 }, function(err){ alert("miss") });
+
+                                for (var i = 0; i < latency; i++){
+                                    recordData[i+latency*s] = inputData[i];
+                                }
+                                for (var sample = 0; sample < outputBuffer.length; sample++) {
+                                    // make output equal to the same as the input
+                                    if(s< N/latency){
+                                        // outputData[sample]=1.0;
+                                        outputData[sample] = freqr2[sample+latency*s];//6150~
+                                    }
+                                    else {
+                                        outputData[sample] = 0;
+                                    }
+                                }
+                            }
+                            source.connect(scriptNode);
+                            if (sample == latency && s< N/latency+4){
+                                s=s+1;
+                            }
+                            else if (sample == latency && s== N/latency+4){
+                                audioCtx.close();
+                            }
+                            drawGraph(recordData);
+                         }
+                         scriptNode.connect(audioCtx.destination);
+
+                         console.log(recordData)
+                     }, function(err){ alert("miss") });
 
                  //↑↑↑書き途中↑↑↑
+
                 }
+;
                 function onStop() {
                     status.innerHTML = 'Interrupted';
                     button.innerHTML = 'Measure';
                     /* write down process */
-                //    ifilter(freqr,ifreqr,ifreqi);
+
+                    ifilter(recordData,ifreqr,ifreqi);
                     if (timer) {
                         clearTimeout(timer);
                     }
@@ -110,7 +134,7 @@
                     freqr[0] = 1.0;
                     freqi[0] = 0;
 
-                    var x = new FFTNayukis(N);
+                    var fftn = new FFTNayukis(N);
                     fftn.ifft(freqr,freqi);
 
                     var C =Math.round(N/2-J/2*(1+(1/Math.log(N/2))));
@@ -135,33 +159,32 @@
                     }
                     normalize(freqr2);
                     drawGraph(freqr2);
-                    console.log(freqr2,D);
                 }
-                function soundplay(array){
-                    var audioCtx = new AudioContext;
-                    var channels = 1;
-                    // AudioContextのサンプルレートで2秒間の空のステレオバッファを生成する
-
-                    var myArrayBuffer = audioCtx.createBuffer(channels, N, audioCtx.sampleRate);
-                    for (var channel = 0; channel < channels; channel++) {
-                        // 実際のデータの配列を得る
-                        var nowBuffering = myArrayBuffer.getChannelData(channel);
-                        for (var i = 0; i < N; i++) {
-                            // Math.random()は[0; 1.0]である
-                            // 音声は[-1.0; 1.0]である必要がある
-                            nowBuffering[i] = array[i];
-                            // nowBuffering[i] = Math.random() * 2 - 1;
-                        }
-                    }                // AudioBufferSourceNodeを得る
-                    // これはAudioBufferを再生するときに使うAudioNodeである
-                    var source = audioCtx.createBufferSource();
-                    // AudioBufferSourceNodeにバッファを設定する
-                    source.buffer = myArrayBuffer;
-                    // AudioBufferSourceNodeを出力先に接続すると音声が聞こえるようになる
-                    source.connect(audioCtx.destination);
-                    // 音源の再生を始める
-                    source.start();
-                }
+                // function soundplay(array){
+                //     var audioCtx = new AudioContext;
+                //     var channels = 1;
+                //     // AudioContextのサンプルレートで2秒間の空のステレオバッファを生成する
+                //
+                //     var myArrayBuffer = audioCtx.createBuffer(channels, N, audioCtx.sampleRate);
+                //     for (var channel = 0; channel < channels; channel++) {
+                //         // 実際のデータの配列を得る
+                //         var nowBuffering = myArrayBuffer.getChannelData(channel);
+                //         for (var i = 0; i < N; i++) {
+                //             // Math.random()は[0; 1.0]である
+                //             // 音声は[-1.0; 1.0]である必要がある
+                //             nowBuffering[i] = array[i];
+                //             // nowBuffering[i] = Math.random() * 2 - 1;
+                //         }
+                //     }                // AudioBufferSourceNodeを得る
+                //     // これはAudioBufferを再生するときに使うAudioNodeである
+                //     var source = audioCtx.createBufferSource();
+                //     // AudioBufferSourceNodeにバッファを設定する
+                //     source.buffer = myArrayBuffer;
+                //     // AudioBufferSourceNodeを出力先に接続すると音声が聞こえるようになる
+                //     source.connect(audioCtx.destination);
+                //     // 音源の再生を始める
+                //     source.start();
+                // }
                 function ifilter(freqr,ifreqr,ifreqi){
                     var freqi = new Float32Array(N);
                     var fftn = new FFTNayukis(N);
@@ -181,7 +204,7 @@
 
                     fftn.ifft(ifreqr,ifreqi);
                     normalize(ifreqr);
-                    soundplay(ifreqr);
+                    //soundplay(ifreqr);
                     drawGraph(ifreqr);
                     console.log(ifreqr);
                 }
