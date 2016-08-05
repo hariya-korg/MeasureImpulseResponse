@@ -13,14 +13,14 @@
                 var button = document.getElementById('button');
                 var timer = null;
                 status.innerHTML = 'Initialized';
-                button.innerHTML = 'Measure';
+                button.innerHTML = 'Rec';
                 button.value = false;
                 button.addEventListener('click', function(event) {
                     var value = this.value == 'false';
                     if (value) {
-                        onStart();
+                        onRec();
                     } else {
-                        onStop();
+                        onIR();
                     }
                     this.value = value;
                 }, false);
@@ -29,36 +29,34 @@
                 n=1;
                 latency  = 4096;
 
-
                 var ifreqr = new Float32Array(N);
                 var ifreqi = new Float32Array(N);
-                var recordData = new Float32Array(N*2);
+                var recordData = new Float32Array(N);
 
-                function onStart() {
+                function onRec() {
                     status.innerHTML = 'Measuring...';
-                    button.innerHTML = 'Stop';
+                    button.innerHTML = 'Impulse Response';
                     var freqr = new Float32Array(N);
                     var freqi = new Float32Array(N);
                     var freqr2 = new Float32Array(N);
                     /* write down process */
                     // timer = setTimeout(onFinish, 2000);
-
-                     pinktsp(N, n, freqr, freqi, freqr2);
-                    //soundplay(freqr2);
+                    var shift = pinktsp(N, n, freqr, freqi, freqr2);
+                    console.log(shift);
                     navigator.getUserMedia = ( navigator.getUserMedia ||
                     navigator.webkitGetUserMedia ||
                     navigator.mozGetUserMedia ||
                     navigator.msGetUserMedia);
 
-                    //↓↓↓書き途中↓↓↓
-
+                    //  freqr2[0] = 1;
                     navigator.getUserMedia ({ audio:true }, function(stream) {
                         var audioCtx = new AudioContext();
-                        var source = audioCtx.createMediaStreamSource(stream)
+                        var source = audioCtx.createMediaStreamSource(stream);
                         //var source = audioCtx.createBufferSource();
                         var scriptNode = audioCtx.createScriptProcessor(latency);
                         // Give the node a function to process audio events
                         var s=0;
+                        var count = 0;
                         scriptNode.onaudioprocess = function(audioProcessingEvent) {
                             // The input buffer is the song we loaded earlier
                             var inputBuffer = audioProcessingEvent.inputBuffer;
@@ -68,45 +66,94 @@
                             for (var channel = 0; channel < outputBuffer.numberOfChannels; channel++) {
                                 var inputData = inputBuffer.getChannelData(channel);
                                 var outputData = outputBuffer.getChannelData(channel);
-
-                                for (var i = 0; i < latency; i++){
-                                    recordData[i+latency*s] = inputData[i];
-                                }
                                 for (var sample = 0; sample < outputBuffer.length; sample++) {
                                     // make output equal to the same as the input
                                     if(s< N/latency){
-                                        // outputData[sample]=1.0;
-                                        outputData[sample] = freqr2[sample+latency*s];//6150~
+                                        outputData[sample] = freqr2[sample+latency*s];
                                     }
-                                    else {
+                                    else{
                                         outputData[sample] = 0;
                                     }
                                 }
                             }
+                            var lag = 13450;
+                            for (var i = 0; i < latency; i++){
+                                if (0<= i+latency*s-lag-shift
+                                    && i+latency*s-lag-shift< N-shift){
+                                    recordData[i+latency*s-lag-shift] = inputData[i];
+                                }
+                                 else if(-shift<=i+latency*s-lag-shift
+                                         && i+latency*s-lag-shift <0){
+                                     recordData[i+latency*s-lag-shift+N] = inputData[i];
+                                 }
+                            }
                             source.connect(scriptNode);
-                            if (sample == latency && s< N/latency+4){
+                            if (sample == latency && s< N/latency+5){
                                 s=s+1;
                             }
-                            else if (sample == latency && s== N/latency+4){
+                            else if (sample == latency && s== N/latency+5){
                                 audioCtx.close();
                             }
                             drawGraph(recordData);
                          }
                          scriptNode.connect(audioCtx.destination);
-
-                         console.log(recordData)
+                         console.log(recordData);
                      }, function(err){ alert("miss") });
+                };
 
-                 //↑↑↑書き途中↑↑↑
-
-                }
-;
-                function onStop() {
+                function onIR() {
                     status.innerHTML = 'Interrupted';
-                    button.innerHTML = 'Measure';
-                    /* write down process */
+                    button.innerHTML = 'Rec';
+                    var ir = ifilter(recordData,ifreqr,ifreqi);
+                    drawGraph(ir);
+                    var audioCtx = new AudioContext;
+                    var exportWAV = function(audioData) {
+                        var encodeWAV = function(samples, sampleRate) {
+                            var buffer = new ArrayBuffer(44 + samples.length * 2);
+                            var view = new DataView(buffer);
+                            var writeString = function(view, offset, string) {
+                                for (var i = 0; i < string.length; i++){
+                                    view.setUint8(offset + i, string.charCodeAt(i));
+                                }
+                            };
+                            var floatTo16BitPCM = function(output, offset, input) {
+                                for (var i = 0; i < input.length; i++, offset += 2){
+                                    var s = Math.max(-1, Math.min(1, input[i]));
+                                    output.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+                                }
+                            };
+                            writeString(view, 0, 'RIFF');  // RIFFヘッダ
+                            view.setUint32(4, 32 + samples.length * 2, true); // これ以降のファイルサイズ
+                            writeString(view, 8, 'WAVE'); // WAVEヘッダ
+                            writeString(view, 12, 'fmt '); // fmtチャンク
+                            view.setUint32(16, 16, true); // fmtチャンクのバイト数
+                            view.setUint16(20, 1, true); // フォーマットID
+                            view.setUint16(22, 1, true); // チャンネル数
+                            view.setUint32(24, sampleRate, true); // サンプリングレート
+                            view.setUint32(28, sampleRate * 2, true); // データ速度
+                            view.setUint16(32, 2, true); // ブロックサイズ
+                            view.setUint16(34, 16, true); // サンプルあたりのビット数
+                            writeString(view, 36, 'data'); // dataチャンク
+                            view.setUint32(40, samples.length * 2, true); // 波形データのバイト数
+                            floatTo16BitPCM(view, 44, samples); // 波形データ
 
-                    ifilter(recordData,ifreqr,ifreqi);
+                            return view;
+                        };
+
+                      var dataview = encodeWAV(audioData, audioCtx.sampleRate);
+                      var audioBlob = new Blob([dataview], { type: 'audio/wav' });
+                      console.log(audioBlob);
+                      var myURL = window.URL || window.webkitURL;
+                      var url = myURL.createObjectURL(audioBlob);
+                      return url;
+
+                    };
+                    var a = document.querySelectorAll('.download')[0];
+                    var wavurl = exportWAV(ir);
+                    a.download = 'ir.wav';
+                    a.href = wavurl;
+                    a.classList.remove('disabled');
+                    console.log(wavurl);
                     if (timer) {
                         clearTimeout(timer);
                     }
@@ -137,16 +184,16 @@
                     var fftn = new FFTNayukis(N);
                     fftn.ifft(freqr,freqi);
 
-                    var C =Math.round(N/2-J/2*(1+(1/Math.log(N/2))));
+                    var shift =Math.round(N/2-J/2*(1+(1/Math.log(N/2))));
                     var D=1;
                     for (var q=1 ; q<10000 ; q++){
                         if (D === 0) { break; }
 
-                        for (var n=0 ; n<C ; n++){
-                            freqr2[n]=freqr[n-C+N];
+                        for (var n=0 ; n<shift ; n++){
+                            freqr2[n]=freqr[n-shift+N];
                         }
-                        for (var m=C ; m<N ; m++){
-                            freqr2[m]=freqr[m-C];
+                        for (var m=shift ; m<N ; m++){
+                            freqr2[m]=freqr[m-shift];
                         }
 
                         var sample = 50;
@@ -155,36 +202,12 @@
                              if(freqr2[N-sample+l]<freqr2[N-sample+l-1])
                              D = sample-l-1;
                         }
-                        C=C+D;
+                        shift=shift+D;
                     }
                     normalize(freqr2);
                     drawGraph(freqr2);
+                    return shift;
                 }
-                // function soundplay(array){
-                //     var audioCtx = new AudioContext;
-                //     var channels = 1;
-                //     // AudioContextのサンプルレートで2秒間の空のステレオバッファを生成する
-                //
-                //     var myArrayBuffer = audioCtx.createBuffer(channels, N, audioCtx.sampleRate);
-                //     for (var channel = 0; channel < channels; channel++) {
-                //         // 実際のデータの配列を得る
-                //         var nowBuffering = myArrayBuffer.getChannelData(channel);
-                //         for (var i = 0; i < N; i++) {
-                //             // Math.random()は[0; 1.0]である
-                //             // 音声は[-1.0; 1.0]である必要がある
-                //             nowBuffering[i] = array[i];
-                //             // nowBuffering[i] = Math.random() * 2 - 1;
-                //         }
-                //     }                // AudioBufferSourceNodeを得る
-                //     // これはAudioBufferを再生するときに使うAudioNodeである
-                //     var source = audioCtx.createBufferSource();
-                //     // AudioBufferSourceNodeにバッファを設定する
-                //     source.buffer = myArrayBuffer;
-                //     // AudioBufferSourceNodeを出力先に接続すると音声が聞こえるようになる
-                //     source.connect(audioCtx.destination);
-                //     // 音源の再生を始める
-                //     source.start();
-                // }
                 function ifilter(freqr,ifreqr,ifreqi){
                     var freqi = new Float32Array(N);
                     var fftn = new FFTNayukis(N);
@@ -205,8 +228,8 @@
                     fftn.ifft(ifreqr,ifreqi);
                     normalize(ifreqr);
                     //soundplay(ifreqr);
-                    drawGraph(ifreqr);
                     console.log(ifreqr);
+                    return ifreqr;
                 }
                 function normalize(array){
                     var max = Math.max.apply(null,array);
@@ -259,6 +282,7 @@
 <body>
     <button id='button'></button>
     <p id='status'></p>
+    <p><a href="#" class="download disabled">Download IR WAV file</a></p>
     <canvas id='graph'></canvas>
 </body>
 
