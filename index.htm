@@ -15,23 +15,26 @@
                 status.innerHTML = 'Initialized';
                 button.innerHTML = 'Rec';
                 button.value = false;
+                N=65536;
+                n=1;
+                latency  = 4096;
+                var ifreqr = new Float32Array(N);
+                var ifreqi = new Float32Array(N);
+                var recordData = new Float32Array(N);
+                var audioCtx = new AudioContext();
+
                 button.addEventListener('click', function(event) {
+
                     var value = this.value == 'false';
                     if (value) {
                         onRec();
                     } else {
-                        onIR();
+                        onStop();
                     }
                     this.value = value;
                 }, false);
 
-                N=65536;
-                n=1;
-                latency  = 4096;
 
-                var ifreqr = new Float32Array(N);
-                var ifreqi = new Float32Array(N);
-                var recordData = new Float32Array(N);
 
                 function onRec() {
                     status.innerHTML = 'Measuring...';
@@ -41,8 +44,7 @@
                     var freqr2 = new Float32Array(N);
                     /* write down process */
                     // timer = setTimeout(onFinish, 2000);
-                    var shift = pinktsp(N, n, freqr, freqi, freqr2);
-                    console.log(shift);
+                    //console.log(shift);
                     navigator.getUserMedia = ( navigator.getUserMedia ||
                     navigator.webkitGetUserMedia ||
                     navigator.mozGetUserMedia ||
@@ -50,7 +52,7 @@
 
                     //  freqr2[0] = 1;
                     navigator.getUserMedia ({ audio:true }, function(stream) {
-                        var audioCtx = new AudioContext();
+                        var shift = pinktsp(N, n, freqr, freqi, freqr2);
                         var source = audioCtx.createMediaStreamSource(stream);
                         //var source = audioCtx.createBufferSource();
                         var scriptNode = audioCtx.createScriptProcessor(latency);
@@ -76,7 +78,7 @@
                                     }
                                 }
                             }
-                            var lag = 13450;
+                            var lag = 13300;
                             for (var i = 0; i < latency; i++){
                                 if (0<= i+latency*s-lag-shift
                                     && i+latency*s-lag-shift< N-shift){
@@ -93,20 +95,22 @@
                             }
                             else if (sample == latency && s== N/latency+5){
                                 audioCtx.close();
+                                ifilter(recordData,ifreqr,ifreqi);
+                                var a = document.querySelectorAll('.download')[0];
+                                var wavurl = exportWAV(ifreqr);
+                                a.download = 'ir.wav';
+                                a.href = wavurl;
+                                a.classList.remove('disabled');
+                                drawGraph(ifreqr);
+                                onFinish();
                             }
-                            drawGraph(recordData);
-                         }
-                         scriptNode.connect(audioCtx.destination);
-                         console.log(recordData);
-                     }, function(err){ alert("miss") });
-                };
+                            // drawGraph(recordData);
+                        }
+                        scriptNode.connect(audioCtx.destination);
+                        console.log(recordData);
+                    }, function(err){ alert("miss") });
 
-                function onIR() {
-                    status.innerHTML = 'Interrupted';
-                    button.innerHTML = 'Rec';
-                    var ir = ifilter(recordData,ifreqr,ifreqi);
-                    drawGraph(ir);
-                    var audioCtx = new AudioContext;
+
                     var exportWAV = function(audioData) {
                         var encodeWAV = function(samples, sampleRate) {
                             var buffer = new ArrayBuffer(44 + samples.length * 2);
@@ -140,31 +144,27 @@
                             return view;
                         };
 
-                      var dataview = encodeWAV(audioData, audioCtx.sampleRate);
-                      var audioBlob = new Blob([dataview], { type: 'audio/wav' });
-                      console.log(audioBlob);
-                      var myURL = window.URL || window.webkitURL;
-                      var url = myURL.createObjectURL(audioBlob);
-                      return url;
+                        var dataview = encodeWAV(audioData, audioCtx.sampleRate);
+                        var audioBlob = new Blob([dataview], { type: 'audio/wav' });
+
+                        console.log(audioBlob);
+                        var myURL = window.URL || window.webkitURL;
+                        var url = myURL.createObjectURL(audioBlob);
+                        return url;
 
                     };
-                    var a = document.querySelectorAll('.download')[0];
-                    var wavurl = exportWAV(ir);
-                    a.download = 'ir.wav';
-                    a.href = wavurl;
-                    a.classList.remove('disabled');
-                    console.log(wavurl);
-                    if (timer) {
-                        clearTimeout(timer);
-                    }
+
+                };
+
+                function onStop() {
+                    status.innerHTML = 'Interrupted';
+                    button.innerHTML = 'Rec';
                 }
                 function onFinish() {
                     status.innerHTML = 'Finished';
                     button.innerHTML = 'Measure';
                     button.value = false;
-
                     /* write down process */
-                    timer = null;
                 }
                 function pinktsp(N, n, freqr, freqi, freqr2){
                     var J = Math.round(N/4*n)*2 ;
@@ -205,7 +205,7 @@
                         shift=shift+D;
                     }
                     normalize(freqr2);
-                    drawGraph(freqr2);
+                    // drawGraph(freqr2);
                     return shift;
                 }
                 function ifilter(freqr,ifreqr,ifreqi){
@@ -227,9 +227,8 @@
 
                     fftn.ifft(ifreqr,ifreqi);
                     normalize(ifreqr);
-                    //soundplay(ifreqr);
-                    console.log(ifreqr);
-                    return ifreqr;
+                    //console.log(ifreqr);
+                    //return ifreqr;
                 }
                 function normalize(array){
                     var max = Math.max.apply(null,array);
@@ -274,7 +273,7 @@
                 }
             }
 
-            window.addEventListener('DOMContentLoaded', onDOMContentLoaded, false);
+        window.addEventListener('DOMContentLoaded', onDOMContentLoaded, false);
         })();
     </script>
 </head>
