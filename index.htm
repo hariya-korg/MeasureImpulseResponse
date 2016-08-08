@@ -8,55 +8,51 @@
     <script type="text/javascript" src="fft.js"></script>
     <script type='text/javascript'>
         (function(){
-            function onDOMContentLoaded() {
-                var status = document.getElementById('status');
-                var button = document.getElementById('button');
-                var timer = null;
-                status.innerHTML = 'Initialized';
-                button.innerHTML = 'Rec';
-                button.value = false;
-                N=65536;
-                n=1;
-                latency  = 4096;
-                var ifreqr = new Float32Array(N);
-                var ifreqi = new Float32Array(N);
+            var console_obj = window.console;
+
+            try{
+                var N=65536*2;
+                var n=1;
+                var latency  = 4096;
                 var recordData = new Float32Array(N);
                 var audioCtx = new(window.AudioContext || window.webkitAudioContext)();
+                function onDOMContentLoaded() {
+                    var status = document.getElementById('status');
+                    var button = document.getElementById('button');
 
-                button.addEventListener('click', function(event) {
-
-                    var value = this.value == 'false';
-                    if (value) {
-                        onRec();
-                    } else {
-                        onStop();
-                    }
-                    this.value = value;
-                }, false);
+                    status.innerHTML = 'Initialized';
+                    button.innerHTML = 'Rec';
+                    button.value = false;
 
 
+                    button.addEventListener('click', function(event) {
+
+                        var value = this.value == 'false';
+                        if (value) {
+                            onRec();
+                        } else {
+                            onStop();
+                        }
+                        this.value = value;
+                    }, false);
+                }
 
                 function onRec() {
                     status.innerHTML = 'Measuring...';
                     button.innerHTML = 'Impulse Response';
+
                     var freqr = new Float32Array(N);
                     var freqi = new Float32Array(N);
                     var freqr2 = new Float32Array(N);
-                    /* write down process */
-                    // timer = setTimeout(onFinish, 2000);
-                    //console.log(shift);
                     navigator.getUserMedia = ( navigator.getUserMedia ||
                     navigator.webkitGetUserMedia ||
                     navigator.mozGetUserMedia ||
                     navigator.msGetUserMedia);
 
-                    //  freqr2[0] = 1;
                     navigator.getUserMedia ({ audio:true }, function(stream) {
                         var shift = pinktsp(N, n, freqr, freqi, freqr2);
                         var source = audioCtx.createMediaStreamSource(stream);
-                        //var source = audioCtx.createBufferSource();
                         var scriptNode = audioCtx.createScriptProcessor(latency);
-                        // Give the node a function to process audio events
                         var s=0;
                         var count = 0;
                         scriptNode.onaudioprocess = function(audioProcessingEvent) {
@@ -95,64 +91,13 @@
                             }
                             else if (sample == latency && s== N/latency+5){
                                 audioCtx.close();
-                                ifilter(recordData,ifreqr,ifreqi);
-                                var a = document.querySelectorAll('.download')[0];
-                                var wavurl = exportWAV(ifreqr);
-                                a.download = 'ir.wav';
-                                a.href = wavurl;
-                                a.classList.remove('disabled');
-                                drawGraph(ifreqr);
+
                                 onFinish();
                             }
-                            // drawGraph(recordData);
                         }
                         scriptNode.connect(audioCtx.destination);
-                        console.log(recordData);
                     }, function(err){ alert("miss") });
 
-
-                    var exportWAV = function(audioData) {
-                        var encodeWAV = function(samples, sampleRate) {
-                            var buffer = new ArrayBuffer(44 + samples.length * 2);
-                            var view = new DataView(buffer);
-                            var writeString = function(view, offset, string) {
-                                for (var i = 0; i < string.length; i++){
-                                    view.setUint8(offset + i, string.charCodeAt(i));
-                                }
-                            };
-                            var floatTo16BitPCM = function(output, offset, input) {
-                                for (var i = 0; i < input.length; i++, offset += 2){
-                                    var s = Math.max(-1, Math.min(1, input[i]));
-                                    output.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-                                }
-                            };
-                            writeString(view, 0, 'RIFF');  // RIFFヘッダ
-                            view.setUint32(4, 32 + samples.length * 2, true); // これ以降のファイルサイズ
-                            writeString(view, 8, 'WAVE'); // WAVEヘッダ
-                            writeString(view, 12, 'fmt '); // fmtチャンク
-                            view.setUint32(16, 16, true); // fmtチャンクのバイト数
-                            view.setUint16(20, 1, true); // フォーマットID
-                            view.setUint16(22, 1, true); // チャンネル数
-                            view.setUint32(24, sampleRate, true); // サンプリングレート
-                            view.setUint32(28, sampleRate * 2, true); // データ速度
-                            view.setUint16(32, 2, true); // ブロックサイズ
-                            view.setUint16(34, 16, true); // サンプルあたりのビット数
-                            writeString(view, 36, 'data'); // dataチャンク
-                            view.setUint32(40, samples.length * 2, true); // 波形データのバイト数
-                            floatTo16BitPCM(view, 44, samples); // 波形データ
-
-                            return view;
-                        };
-                        var audioCtx =  new(window.AudioContext || window.webkitAudioContext)();
-                        var dataview = encodeWAV(audioData, audioCtx.sampleRate);
-                        var audioBlob = new Blob([dataview], { type: 'audio/wav' });
-
-                        console.log(audioBlob);
-                        var myURL = window.URL || window.webkitURL;
-                        var url = myURL.createObjectURL(audioBlob);
-                        return url;
-
-                    };
 
                 };
 
@@ -160,12 +105,61 @@
                     status.innerHTML = 'Interrupted';
                     button.innerHTML = 'Rec';
                 }
-                function onFinish() {
+
+                function onFinish() {//逆Filter,encodeWAV,exportWAV
+                    var ifreqr = new Float32Array(N);
+                    var ifreqi = new Float32Array(N);
+                    ifilter(recordData,ifreqr,ifreqi);
+                    // audioCtx.resume()
+                    var audioCtx = new(window.AudioContext || window.webkitAudioContext)();
+
+                    var exportWAV =function(audioData){
+                        var buffer = new ArrayBuffer(44 + audioData.length * 2);//encodeWAV start
+                        var view = new DataView(buffer);
+                        var writeString = function(view, offset, string) {
+                            for (var i = 0; i < string.length; i++){
+                                view.setUint8(offset + i, string.charCodeAt(i));
+                            }
+                        };
+                        var floatTo16BitPCM = function(output, offset, input) {
+                            for (var i = 0; i < input.length; i++, offset += 2){
+                                var s = Math.max(-1, Math.min(1, input[i]));
+                                output.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+                            }
+                        };
+                        writeString(view, 0, 'RIFF');  // RIFFヘッダ
+                        view.setUint32(4, 32 + audioData.length * 2, true); // これ以降のファイルサイズ
+                        writeString(view, 8, 'WAVE'); // WAVEヘッダ
+                        writeString(view, 12, 'fmt '); // fmtチャンク
+                        view.setUint32(16, 16, true); // fmtチャンクのバイト数
+                        view.setUint16(20, 1, true); // フォーマットID
+                        view.setUint16(22, 1, true); // チャンネル数
+                        view.setUint32(24, audioCtx.sampleRate, true); // サンプリングレート
+                        view.setUint32(28, audioCtx.sampleRate * 2, true); // データ速度
+                        view.setUint16(32, 2, true); // ブロックサイズ
+                        view.setUint16(34, 16, true); // サンプルあたりのビット数
+                        writeString(view, 36, 'data'); // dataチャンク
+                        view.setUint32(40, audioData.length * 2, true); // 波形データのバイト数
+                        floatTo16BitPCM(view, 44, audioData); // 波形データ    //encodeWAV end
+
+                        var audioBlob = new Blob([view], { type: 'audio/wav' });
+                        var myURL = window.URL || window.webkitURL;
+                        var url = myURL.createObjectURL(audioBlob);
+
+                        return url;
+                    };
+                    var a = document.querySelectorAll('.download')[0];//downloadWAV
+                    var wavurl = exportWAV(ifreqr);
+                    a.download = 'ir.wav';
+                    a.href = wavurl;
+                    a.classList.remove('disabled');
+                    drawGraph(ifreqr);
+
                     status.innerHTML = 'Finished';
                     button.innerHTML = 'Measure';
                     button.value = false;
-                    /* write down process */
                 }
+
                 function pinktsp(N, n, freqr, freqi, freqr2){
                     var J = Math.round(N/4*n)*2 ;
                     var a =J*Math.PI/(N/2)/Math.log(N/2);
@@ -208,6 +202,7 @@
                     // drawGraph(freqr2);
                     return shift;
                 }
+
                 function ifilter(freqr,ifreqr,ifreqi){
                     var freqi = new Float32Array(N);
                     var fftn = new FFTNayukis(N);
@@ -230,6 +225,7 @@
                     //console.log(ifreqr);
                     //return ifreqr;
                 }
+
                 function normalize(array){
                     var max = Math.max.apply(null,array);
                     var min = Math.abs(Math.min.apply(null,array));
@@ -239,6 +235,7 @@
                         array[l]=array[l]/max;
                     }
                 }
+
                 function drawGraph(array) {
                     var width = window.innerWidth * 0.8;
                     var height = window.innerHeight * 0.8;
@@ -271,8 +268,9 @@
 
                     canvasCtx.stroke();
                 }
+            }catch(e){
+                console.log(e);
             }
-
         window.addEventListener('DOMContentLoaded', onDOMContentLoaded, false);
         })();
     </script>
