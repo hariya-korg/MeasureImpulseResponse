@@ -21,7 +21,7 @@
                 var ifreqr = new Float32Array(N);
                 var ifreqi = new Float32Array(N);
                 var recordData = new Float32Array(N);
-                var audioCtx = new AudioContext();
+                var audioCtx = new(window.AudioContext || window.webkitAudioContext)();
 
                 button.addEventListener('click', function(event) {
 
@@ -143,7 +143,7 @@
 
                             return view;
                         };
-                        var audioCtx = new AudioContext();
+                        var audioCtx =  new(window.AudioContext || window.webkitAudioContext)();
                         var dataview = encodeWAV(audioData, audioCtx.sampleRate);
                         var audioBlob = new Blob([dataview], { type: 'audio/wav' });
 
