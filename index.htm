@@ -8,39 +8,67 @@
     <script type="text/javascript" src="fft.js"></script>
     <script type='text/javascript'>
         (function(){
+            var status,button;
             var console_obj = window.console;
+            var N=65536*2;//信号長
+            var n=1;//実効長0~1
+            var latency  = 4096;
+            var repeat = 3;//同期加算回数
+            var audioCtx = new(window.AudioContext || window.webkitAudioContext)();
+            var recordData = new Float32Array(N);
+            var sampleRate;
+            function onDOMContentLoaded() {
+                status = document.getElementById('status');
+                button = document.getElementById('button');
+                calib = document.getElementById('calib');
 
-            try{
-                var N=65536*2;
-                var n=1;
-                var latency  = 4096;
-                var recordData = new Float32Array(N);
-                var audioCtx = new(window.AudioContext || window.webkitAudioContext)();
-                function onDOMContentLoaded() {
-                    var status = document.getElementById('status');
-                    var button = document.getElementById('button');
+                status.innerHTML = 'Initialized';
+                button.innerHTML = 'Rec';
+                button.value = false;
+                button.addEventListener('click', function(event) {
+                    var value = this.value == 'false';
+                    if (value) {
+                        onRec();
+                    } else {
+                        onStop();
+                    }
+                    this.value = value;
+                }, false);
 
-                    status.innerHTML = 'Initialized';
-                    button.innerHTML = 'Rec';
-                    button.value = false;
+                calib.innerHTML = 'calib';
+                calib.value = false;
+                calib.addEventListener('click', function(event) {
+                    var value2 = this.value == 'false';
+                    if (value2) {
+                        onCalib();
+                    } else {
+                        onStopcalib();
+                    }
+                    this.value = value2;
+                }, false);
 
-
-                    button.addEventListener('click', function(event) {
-
-                        var value = this.value == 'false';
-                        if (value) {
-                            onRec();
-                        } else {
-                            onStop();
-                        }
-                        this.value = value;
-                    }, false);
-                }
-
-                function onRec() {
-                    status.innerHTML = 'Measuring...';
-                    button.innerHTML = 'Impulse Response';
-
+            }
+            var oscillator;
+            function onCalib(){
+                status.innerHTML = 'Playing Sine 440Hz';
+                calib.innerHTML =  'StopSine'
+                oscillator = audioCtx.createOscillator();
+                oscillator.type = 'sine';
+                oscillator.frequency.value = 440;
+                oscillator.connect(audioCtx.destination);
+                oscillator.start();
+            }
+            function onStopcalib(){
+                status.innerHTML = 'Initialized';
+                calib.innerHTML =  'calib'
+                oscillator.stop();
+            }
+            var scriptNode;
+            function onRec() {
+                status.innerHTML = 'Measuring...';
+                button.innerHTML = 'Stop';
+                try{
+                    sampleRate = audioCtx.sampleRate;
                     var freqr = new Float32Array(N);
                     var freqi = new Float32Array(N);
                     var freqr2 = new Float32Array(N);
@@ -52,10 +80,14 @@
                     navigator.getUserMedia ({ audio:true }, function(stream) {
                         var shift = pinktsp(N, n, freqr, freqi, freqr2);
                         var source = audioCtx.createMediaStreamSource(stream);
-                        var scriptNode = audioCtx.createScriptProcessor(latency);
-                        var s=0;
+                        scriptNode = audioCtx.createScriptProcessor(latency);
                         var count = 0;
+                        var s=0;
+                        var l=0;
+                        var count =0;
+
                         scriptNode.onaudioprocess = function(audioProcessingEvent) {
+                            // freqr2[0]=1;
                             // The input buffer is the song we loaded earlier
                             var inputBuffer = audioProcessingEvent.inputBuffer;
                             // The output buffer contains the samples that will be modified and played
@@ -75,45 +107,58 @@
                                 }
                             }
                             var lag = 13300;
+                            //   shift=0;
                             for (var i = 0; i < latency; i++){
-                                if (0<= i+latency*s-lag-shift
-                                    && i+latency*s-lag-shift< N-shift){
-                                    recordData[i+latency*s-lag-shift] = inputData[i];
+                                for (m=1; m<repeat;m++){
+                                    if (N*m<= i+latency*(s+l*N/latency)-lag-shift
+                                    && i+latency*(s+l*N/latency)-lag-shift< N*(m+1)-shift){
+                                        recordData[i+latency*(s+l*N/latency)-lag-N*m-shift] += inputData[i];
+                                    }
+                                    else if(N*m-shift<= i+latency*(s+l*N/latency)-lag-shift
+                                    && i+latency*(s+l*N/latency)-lag-shift< N*m){
+                                        recordData[i+latency*(s+l*N/latency)-lag-N*m-shift+N*(m+1)] += inputData[i];
+                                    }
                                 }
-                                 else if(-shift<=i+latency*s-lag-shift
-                                         && i+latency*s-lag-shift <0){
-                                     recordData[i+latency*s-lag-shift+N] = inputData[i];
-                                 }
                             }
                             source.connect(scriptNode);
-                            if (sample == latency && s< N/latency+5){
+                            if (sample == latency && s< N/latency-1){
                                 s=s+1;
                             }
-                            else if (sample == latency && s== N/latency+5){
-                                audioCtx.close();
-
+                            else if (sample == latency && s== N/latency-1 && l<repeat-1){
+                                s=0;
+                                l=l+1;
+                            }
+                            else if (sample == latency && s< N/latency+5 && l==repeat-1){
+                                s=s+1;
+                            }
+                            else if (sample == latency && s== N/latency+5 && l==repeat-1){
+                                this.disconnect();
                                 onFinish();
                             }
                         }
                         scriptNode.connect(audioCtx.destination);
                     }, function(err){ alert("miss") });
-
-
-                };
-
-                function onStop() {
-                    status.innerHTML = 'Interrupted';
-                    button.innerHTML = 'Rec';
+                }catch(e){
+                    status.innerHTML = 'Error : ' + e.message;
                 }
 
-                function onFinish() {//逆Filter,encodeWAV,exportWAV
-                    var ifreqr = new Float32Array(N);
-                    var ifreqi = new Float32Array(N);
-                    ifilter(recordData,ifreqr,ifreqi);
-                    // audioCtx.resume()
-                    var audioCtx = new(window.AudioContext || window.webkitAudioContext)();
+            };
 
-                    var exportWAV =function(audioData){
+            function onStop() {
+                status.innerHTML = 'Interrupted';
+                button.innerHTML = 'Rec';
+                scriptNode.disconnect();
+            }
+
+            function onFinish() {//逆Filter,encodeWAV,exportWAV
+                console.log(recordData);
+                drawGraph(recordData);
+                var ifreqr = new Float32Array(N);
+                var ifreqi = new Float32Array(N);
+                ifilter(recordData,ifreqr,ifreqi);
+
+                var exportWAV =function(audioData){
+                    try{
                         var buffer = new ArrayBuffer(44 + audioData.length * 2);//encodeWAV start
                         var view = new DataView(buffer);
                         var writeString = function(view, offset, string) {
@@ -134,8 +179,8 @@
                         view.setUint32(16, 16, true); // fmtチャンクのバイト数
                         view.setUint16(20, 1, true); // フォーマットID
                         view.setUint16(22, 1, true); // チャンネル数
-                        view.setUint32(24, audioCtx.sampleRate, true); // サンプリングレート
-                        view.setUint32(28, audioCtx.sampleRate * 2, true); // データ速度
+                        view.setUint32(24, sampleRate, true); // サンプリングレート
+                        view.setUint32(28, sampleRate * 2, true); // データ速度
                         view.setUint16(32, 2, true); // ブロックサイズ
                         view.setUint16(34, 16, true); // サンプルあたりのビット数
                         writeString(view, 36, 'data'); // dataチャンク
@@ -147,137 +192,135 @@
                         var url = myURL.createObjectURL(audioBlob);
 
                         return url;
-                    };
-                    var a = document.querySelectorAll('.download')[0];//downloadWAV
-                    var wavurl = exportWAV(ifreqr);
-                    a.download = 'ir.wav';
-                    a.href = wavurl;
-                    a.classList.remove('disabled');
-                    drawGraph(ifreqr);
-
-                    status.innerHTML = 'Finished';
-                    button.innerHTML = 'Measure';
-                    button.value = false;
-                }
-
-                function pinktsp(N, n, freqr, freqi, freqr2){
-                    var J = Math.round(N/4*n)*2 ;
-                    var a =J*Math.PI/(N/2)/Math.log(N/2);
-
-                    for (var k=1 ; k<=N/2 ; k++){
-                        freqr[k] = Math.sqrt(1/k)*Math.cos(-a*k*Math.log(k));
-                        freqi[k] = Math.sqrt(1/k)*Math.sin(-a*k*Math.log(k));
+                    }catch(e){
+                        status.innerHTML = 'Error : ' + e.message;
                     }
-                    for (var k=N/2+1 ; k<N ; k++){
-                        freqr[k] = freqr[N-k];
-                        freqi[k] = -freqi[N-k];
-                    }
-                    freqr[0] = 1.0;
-                    freqi[0] = 0;
+                };
+                var a = document.querySelectorAll('.download')[0];//downloadWAV
+                var wavurl = exportWAV(ifreqr);
+                a.download = 'ir.wav';
+                a.href = wavurl;
+                a.classList.remove('disabled');
+                drawGraph(ifreqr);
 
-                    var fftn = new FFTNayukis(N);
-                    fftn.ifft(freqr,freqi);
-
-                    var shift =Math.round(N/2-J/2*(1+(1/Math.log(N/2))));
-                    var D=1;
-                    for (var q=1 ; q<10000 ; q++){
-                        if (D === 0) { break; }
-
-                        for (var n=0 ; n<shift ; n++){
-                            freqr2[n]=freqr[n-shift+N];
-                        }
-                        for (var m=shift ; m<N ; m++){
-                            freqr2[m]=freqr[m-shift];
-                        }
-
-                        var sample = 50;
-                        var D=sample-1;
-                        for (var l=1 ; l<sample ; l++){
-                             if(freqr2[N-sample+l]<freqr2[N-sample+l-1])
-                             D = sample-l-1;
-                        }
-                        shift=shift+D;
-                    }
-                    normalize(freqr2);
-                    // drawGraph(freqr2);
-                    return shift;
-                }
-
-                function ifilter(freqr,ifreqr,ifreqi){
-                    var freqi = new Float32Array(N);
-                    var fftn = new FFTNayukis(N);
-                    fftn.fft(freqr,freqi);
-                    var J = Math.round(N/4*n)*2 ;
-                    var a =J*Math.PI/(N/2)/Math.log(N/2);
-                    for (var k=0; k<=N/2; k++) {
-                     ifreqr[k] = Math.sqrt(k)*(freqr[k]*Math.cos(a*k*Math.log(k))-freqi[k]*Math.sin(a*k*Math.log(k)));
-                     ifreqi[k] = Math.sqrt(k)*(freqr[k]*Math.sin(a*k*Math.log(k))+freqi[k]*Math.cos(a*k*Math.log(k)));
-                    }
-                    for (var k=N/2+1 ; k<N ; k++){
-                        ifreqr[k] = ifreqr[N-k];
-                        ifreqi[k] = -ifreqi[N-k];
-                    }
-                     ifreqr[0]=1.0;
-                     ifreqi[0]=0;
-
-                    fftn.ifft(ifreqr,ifreqi);
-                    normalize(ifreqr);
-                    //console.log(ifreqr);
-                    //return ifreqr;
-                }
-
-                function normalize(array){
-                    var max = Math.max.apply(null,array);
-                    var min = Math.abs(Math.min.apply(null,array));
-                    if (max<min)
-                        max = min ;
-                    for (var l=0 ; l<array.length ; l++){
-                        array[l]=array[l]/max;
-                    }
-                }
-
-                function drawGraph(array) {
-                    var width = window.innerWidth * 0.8;
-                    var height = window.innerHeight * 0.8;
-                    var center = height * 0.4;
-                    var canvas = document.getElementById('graph');
-                    canvas.setAttribute('width', width);
-                    canvas.setAttribute('height', height);
-
-                    var length = array.length;
-                    var unit = width / (length - 1.0);
-
-                    var canvasCtx = canvas.getContext('2d');
-                    canvasCtx.clearRect(0.0, 0.0, width, height);
-                    canvasCtx.strokeStyle = 'rgb(0, 0, 0)';
-                    canvasCtx.lineWidth	= 1;
-                    canvasCtx.lineJoin	= 'round';
-                    canvasCtx.beginPath();
-                    canvasCtx.moveTo(width, center * (1.0 - array[(length - 1)|0]));
-                    for (var index = (length - 2)|0; index >=0; index = (index - 1)|0) {
-                        canvasCtx.lineTo(unit * index, center * (1.0 - array[index<<1>>1]));
-                    }
-                    canvasCtx.stroke();
-
-                    canvasCtx.strokeStyle = 'rgb(0, 0, 255)';
-                    canvasCtx.lineWidth	= 1;
-                    canvasCtx.lineJoin	= 'round';
-                    canvasCtx.beginPath();
-                    canvasCtx.moveTo(width, center);
-                    canvasCtx.lineTo(0, center);
-
-                    canvasCtx.stroke();
-                }
-            }catch(e){
-                console.log(e);
+                status.innerHTML = 'Finished';
+                button.innerHTML = 'Rec';
+                button.value = false;
             }
-        window.addEventListener('DOMContentLoaded', onDOMContentLoaded, false);
+
+            function pinktsp(N, n, freqr, freqi, freqr2){
+                var J = Math.round(N/4*n)*2 ;
+                var a =J*Math.PI/(N/2)/Math.log(N/2);
+
+                for (var k=1 ; k<=N/2 ; k++){
+                    freqr[k] = Math.sqrt(1/k)*Math.cos(-a*k*Math.log(k));
+                    freqi[k] = Math.sqrt(1/k)*Math.sin(-a*k*Math.log(k));
+                }
+                for (var k=N/2+1 ; k<N ; k++){
+                    freqr[k] = freqr[N-k];
+                    freqi[k] = -freqi[N-k];
+                }
+                freqr[0] = 1.0;
+                freqi[0] = 0;
+
+                var fftn = new FFTNayukis(N);
+                fftn.ifft(freqr,freqi);
+
+                var shift =Math.round(N/2-J/2*(1+(1/Math.log(N/2))));
+                var D=1;
+                for (var q=1 ; q<10000 ; q++){
+                    if (D === 0) { break; }
+
+                    for (var n=0 ; n<shift ; n++){
+                        freqr2[n]=freqr[n-shift+N];
+                    }
+                    for (var m=shift ; m<N ; m++){
+                        freqr2[m]=freqr[m-shift];
+                    }
+
+                    var sample = 50;
+                    var D=sample-1;
+                    for (var l=1 ; l<sample ; l++){
+                         if(freqr2[N-sample+l]<freqr2[N-sample+l-1])
+                         D = sample-l-1;
+                    }
+                    shift=shift+D;
+                }
+                normalize(freqr2);
+                // drawGraph(freqr2);
+                return shift;
+            }
+
+            function ifilter(freqr,ifreqr,ifreqi){
+                var freqi = new Float32Array(N);
+                var fftn = new FFTNayukis(N);
+                fftn.fft(freqr,freqi);
+                var J = Math.round(N/4*n)*2 ;
+                var a =J*Math.PI/(N/2)/Math.log(N/2);
+                for (var k=0; k<=N/2; k++) {
+                 ifreqr[k] = Math.sqrt(k)*(freqr[k]*Math.cos(a*k*Math.log(k))-freqi[k]*Math.sin(a*k*Math.log(k)));
+                 ifreqi[k] = Math.sqrt(k)*(freqr[k]*Math.sin(a*k*Math.log(k))+freqi[k]*Math.cos(a*k*Math.log(k)));
+                }
+                for (var k=N/2+1 ; k<N ; k++){
+                    ifreqr[k] = ifreqr[N-k];
+                    ifreqi[k] = -ifreqi[N-k];
+                }
+                 ifreqr[0]=1.0;
+                 ifreqi[0]=0;
+
+                fftn.ifft(ifreqr,ifreqi);
+                normalize(ifreqr);
+            }
+
+            function normalize(array){
+                var max = Math.max.apply(null,array);
+                var min = Math.abs(Math.min.apply(null,array));
+                if (max<min)
+                    max = min ;
+                for (var l=0 ; l<array.length ; l++){
+                    array[l]=array[l]/max;
+                }
+            }
+
+            function drawGraph(array) {
+                var width = window.innerWidth * 0.8;
+                var height = window.innerHeight * 0.8;
+                var center = height * 0.4;
+                var canvas = document.getElementById('graph');
+                canvas.setAttribute('width', width);
+                canvas.setAttribute('height', height);
+                var length = array.length;
+                var unit = width / (length - 1.0);
+                var canvasCtx = canvas.getContext('2d');
+                canvasCtx.clearRect(0.0, 0.0, width, height);
+                canvasCtx.strokeStyle = 'rgb(0, 0, 0)';
+                canvasCtx.lineWidth	= 1;
+                canvasCtx.lineJoin	= 'round';
+                canvasCtx.beginPath();
+                canvasCtx.moveTo(width, center * (1.0 - array[(length - 1)|0]));
+                for (var index = (length - 2)|0; index >=0; index = (index - 1)|0) {
+                    canvasCtx.lineTo(unit * index, center * (1.0 - array[index<<1>>1]));
+                }
+                canvasCtx.stroke();
+                canvasCtx.strokeStyle = 'rgb(0, 0, 255)';
+                canvasCtx.lineWidth	= 1;
+                canvasCtx.lineJoin	= 'round';
+                canvasCtx.beginPath();
+                canvasCtx.moveTo(width, center);
+                canvasCtx.lineTo(0, center);
+                canvasCtx.stroke();
+            }
+            window.addEventListener('DOMContentLoaded', onDOMContentLoaded, false);
         })();
+
     </script>
 </head>
 
 <body>
     <button id='button'></button>
+    <button id='calib'></button>
+     <form name="form1" id="id_form1" action="">
+     <input name="textBox1" id="id_textBox1" type="text" value="" />
     <p id='status'></p>
     <p><a href="#" class="download disabled">Download IR WAV file</a></p>
     <canvas id='graph'></canvas>
