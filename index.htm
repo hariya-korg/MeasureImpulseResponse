@@ -10,10 +10,7 @@
         (function(){
             var status,measure,calib;
             var console_obj = window.console;
-            var N=65536*2;//信号長
-            var n=1;//0~1
-            var J = Math.round(N/4*n)*2 ;//実効長
-            var a =J*Math.PI/(N/2)/Math.log(N/2);//計算式
+            var N,n,j,a;
             var latency  = 4096;
             var audioCtx = new(window.AudioContext || window.webkitAudioContext)();
             var sampleRate;
@@ -21,7 +18,6 @@
             var scriptNode;
 
             function onDOMContentLoaded() {
-
                 status = document.getElementById('status');
                 measure = document.getElementById('measure');
                 calib = document.getElementById('calib');
@@ -39,7 +35,7 @@
                     this.value = value;
                 }, false);
 
-                calib.innerHTML = 'calib';
+                calib.innerHTML = 'Calib';
                 calib.value = false;
                 calib.addEventListener('click', function(event) {
                     var value2 = this.value == 'false';
@@ -69,7 +65,15 @@
                 navigator.mozGetUserMedia ||
                 navigator.msGetUserMedia);
 
-                navigator.getUserMedia ({ audio:true }, function(stream) {
+                navigator.getUserMedia ({audio: {
+                    "mandatory": {
+                        "googEchoCancellation": false,
+                        "googAutoGainControl": false,
+                        "googNoiseSuppression": false,
+                        "googHighpassFilter": false
+                    },
+                    "optional": []
+                }}, function(stream) {
                     var source = audioCtx.createMediaStreamSource(stream);
                     var inputmax=0;
                     var inputmin=0;
@@ -79,21 +83,22 @@
                         var inputBuffer = audioProcessingEvent.inputBuffer;
                         for (var channel = 0; channel < inputBuffer.numberOfChannels; channel++) {
                             var inputData = inputBuffer.getChannelData(channel);
-                                var max = Math.max.apply(null,inputData);
-                                var min = Math.abs(Math.min.apply(null,inputData));
-                                if (max<min){
-                                    max = min ;
-                                }
+                            var inputmax = Math.max.apply(null,inputData);
+                            var inputmin = Math.abs(Math.min.apply(null,inputData));
+                            if (inputmax<inputmin){
+                                    inputmax = inputmin ;
                             }
-                        if(20*Math.log10(max)>-12){
-                            status.innerHTML='too large';
+                        }
+                        var maxdb = 20*Math.log10(inputmax);
+                        if(maxdb > -6){
+                            status.innerHTML='too large '+ Math.floor(maxdb) +'dB';
                             status.style.color = "red";
-                        }else if(20*Math.log10(max)<-24){
-                            status.innerHTML='too small';
+                        }else if(maxdb < -20){
+                            status.innerHTML='too small '+ Math.floor(maxdb) +'dB';
                             status.style.color = "black";
                         }
                         else{
-                            status.innerHTML = 'proper';
+                            status.innerHTML = 'proper '+ Math.floor(maxdb) +'dB';
                             status.style.color = "green";
                         }
                     }
@@ -104,7 +109,8 @@
 
             function onStopCalib(){
                 status.innerHTML = 'Initialized';
-                calib.innerHTML =  'calib'
+                status.style.color = "black";
+                calib.innerHTML =  'Calib'
                 oscillator.stop();
                 scriptNode.disconnect();
             }
@@ -113,16 +119,28 @@
             function onStartMeasure() {
                 status.innerHTML = 'Measuring...';
                 measure.innerHTML = 'Stop';
+                N= 65536*eval(form1.recordlength.value);
+                n=1;//0~1
+                J = Math.round(N/4*n)*2;//実効長
+                a = J*Math.PI/(N/2)/Math.log(N/2);//計算式
                 try{
                     var recordData = new Float32Array(N);
-                    var repeat = eval(form1.textBox1.value);//同期加算回数
+                    var repeat = eval(form1.recordtimes.value);//同期加算回数
                     sampleRate = audioCtx.sampleRate;
                     navigator.getUserMedia = ( navigator.getUserMedia ||
                     navigator.webkitGetUserMedia ||
                     navigator.mozGetUserMedia ||
                     navigator.msGetUserMedia);
 
-                    navigator.getUserMedia ({ audio:true }, function(stream) {
+                    navigator.getUserMedia ({audio: {
+                        "mandatory": {
+                            "googEchoCancellation": false,
+                            "googAutoGainControl": false,
+                            "googNoiseSuppression": false,
+                            "googHighpassFilter": false
+                        },
+                        "optional": []
+                    }}, function(stream) {
                         var pinktsp = createPinktsp(N);
                         var shift = pinktsp.shift;
                         var source = audioCtx.createMediaStreamSource(stream);
@@ -147,7 +165,7 @@
                                     }
                                 }
                             }
-                            var lag = 13300;
+                            var lag = 13300+eval(form1.plusshift.value);
                             for (var i = 0; i < latency; i++){
                                 for (m=1; m<repeat;m++){
                                     if (N*m<= i+latency*(s+l*N/latency)-lag-shift
@@ -174,8 +192,8 @@
                                 this.disconnect();
                                 normalize(recordData);
                                 drawGraph(recordData);
-                                console.log(recordData);
-                                 ir = onFinishMeasure(recordData);
+                                ir = onFinishMeasure(recordData);
+
                             }
 
                         }
@@ -195,6 +213,9 @@
 
             function onFinishMeasure(recordData) {//逆Filter,encodeWAV,exportWAV
                 var ir = getImpulseResponse(recordData);
+                for (m=0; m<= ir.length/2; m++){
+                    ir[ir.length-m] = 0;
+                }
                 var d = document.querySelectorAll('.download')[0];//downloadWAV
                 var wavurl = exportWAV(ir);
                 d.download = 'ir.wav';
@@ -204,6 +225,7 @@
                 measure.innerHTML = 'Start';
                 measure.value = false;
                 drawGraph(ir);
+                // console.log(ir);
                 return ir;
             }
 
@@ -314,9 +336,11 @@
             }
 
             function normalize(array){
-                var max = Math.max.apply(null,array);
-                var min = Math.abs(Math.min.apply(null,array));
-                if (max<min)
+                var copy = array.slice(0);
+                copy.sort();
+                var max = copy[copy.length-1];
+                var min = Math.abs(copy[0]);
+                 if (max<min)
                     max = min ;
                 for (var l=0 ; l<array.length ; l++){
                     array[l]=array[l]/max;
@@ -384,9 +408,11 @@
 <body>
     <button id='measure'></button>
     <button id='calib'></button>
-    <button id='playir'>playir</button>
+    <button id='playir'>PlayIR</button>
     <form name="form1" id="id_form1" action="">
-    number of recording times: <input size ="1" name="textBox1" id="id_textBox1" type="text" value="3" />
+    <p>Length of recording time : <input size ="1" name="recordlength"  type="text" value="2" />(1/16～32)</p>
+    <p>Number of recording times: <input size ="1" name="recordtimes"  type="text" value="3" /></p>
+    <p>Shift: <input size ="1" name="plusshift" type="text" value="100" /></p>
     </form>
     <p id='status'></p>
     <p><a href="#" class="download disabled">Download IR WAV file</a></p>
