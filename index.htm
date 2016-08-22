@@ -6,18 +6,73 @@
     <title>Measure Impulse Response</title>
     <link type='text/css' rel='stylesheet' href='style.css'></link>
     <script type="text/javascript" src="fft.js"></script>
+    <script src="jquery-2.0.3.min.js"></script>
+    <script src="jquery.xdomainajax.js"></script>
     <script type='text/javascript'>
-        (function(){
+
+
+        (function(){//wavのステレオ化、グラフの色指定、ダウンロードボタンの無効化、
             var status,measure,calib;
             var console_obj = window.console;
             var N,n,j,a;
             var latency  = 4096;
-            var audioCtx = new(window.AudioContext || window.webkitAudioContext)();
             var sampleRate;
             var ir;
             var scriptNode;
+            var audioCtx = new(window.AudioContext || window.webkitAudioContext)();
 
+            var ir2;
+            var files;
+            var source2 = null;
+            var convolver = audioCtx.createConvolver();
+            var revlevel = audioCtx.createGain();
+            revlevel.gain.value=0.5;
+            convolver.connect(revlevel);
+            revlevel.connect(audioCtx.destination);
+            var buffers = [];
+            var loadidx = 0;
+            var req = new XMLHttpRequest();
+
+            function LoadBuffers() {
+                req.open("GET", files[loadidx], true);
+                req.responseType = "arraybuffer";
+                req.onload = function() {
+                    if(req.response) {
+                        audioCtx.decodeAudioData(req.response,function(b){
+                            buffers[loadidx]=b;
+                            if(++loadidx < files.length)
+                                LoadBuffers();
+                        },function(){});
+                    }
+                    else
+                        buffers[loadidx] = audioCtx.createBuffer(VBArray(req.responseBody).toArray(), false);
+                };
+                req.send();
+            }
+
+            function Setup() {
+                var lev=document.getElementById("revlevel").value;
+                revlevel.gain.value=parseInt(lev)*0.01;
+                document.getElementById("revdisp").innerHTML=lev;
+            }
+
+            function Play() {
+                if(source2 == null) {
+                    source2 = audioCtx.createBufferSource();
+                    source2.buffer = buffers[0];
+                    convolver.buffer = buffers[1];
+                    source2.loop = true;
+                    // source2.connect(audioCtx.destination);
+                    source2.connect(convolver);
+                    source2.start(0);
+                }
+                else {
+                    source2.stop(0);
+                    source2 = null;
+                }
+            }
             function onDOMContentLoaded() {
+
                 status = document.getElementById('status');
                 measure = document.getElementById('measure');
                 calib = document.getElementById('calib');
@@ -47,9 +102,31 @@
                     this.value = value2;
                 }, false);
 
+
+                files = [
+                    form1.samplefile.value,"ir3.wav"
+                ];
+                LoadBuffers();
+
                 document.getElementById('playir').addEventListener('click',function(event){
                     soundplay(ir);
                 },false);
+
+                document.getElementById('samplefile').addEventListener('change',function(event){
+                    files = [
+                        form1.samplefile.value,"ir3.wav"
+                    ];
+                },false);
+
+                document.getElementById('playconv').addEventListener('click',function(event){
+                    Play();
+                },false);
+
+                document.getElementById('revlevel').addEventListener('change',function(event){
+                    Setup();
+                },false);
+
+                document.getElementById("irlink").style.display="none";
             }
 
             var oscillator;
@@ -57,14 +134,13 @@
                 calib.innerHTML =  'StopSine'
                 oscillator = audioCtx.createOscillator();
                 oscillator.type = 'sine';
-                oscillator.frequency.value = 1000;
+                oscillator.frequency.value =eval(form1.calibfreq.value);
                 oscillator.connect(audioCtx.destination);
                 oscillator.start();
                 navigator.getUserMedia = ( navigator.getUserMedia ||
                 navigator.webkitGetUserMedia ||
                 navigator.mozGetUserMedia ||
                 navigator.msGetUserMedia);
-
                 navigator.getUserMedia ({audio: {
                     "mandatory": {
                         "googEchoCancellation": false,
@@ -115,11 +191,19 @@
                 scriptNode.disconnect();
             }
 
-
             function onStartMeasure() {
                 status.innerHTML = 'Measuring...';
                 measure.innerHTML = 'Stop';
-                N= 65536*eval(form1.recordlength.value);
+                document.getElementById("irlink").style.display="none";
+
+                N= Math.round(65536*4/3*eval(form1.recordlength.value));
+                console.log(N);
+                for (var b=1; b<20; b++){
+                    if (Math.pow(2,b)<N && N<=Math.pow(2,b+1)){
+                        N = Math.pow(2,b+1);
+                    }
+                }
+                console.log(N);
                 n=1;//0~1
                 J = Math.round(N/4*n)*2;//実効長
                 a = J*Math.PI/(N/2)/Math.log(N/2);//計算式
@@ -193,9 +277,7 @@
                                 normalize(recordData);
                                 drawGraph(recordData);
                                 ir = onFinishMeasure(recordData);
-
                             }
-
                         }
                         source.connect(scriptNode);
                         scriptNode.connect(audioCtx.destination);
@@ -213,11 +295,12 @@
 
             function onFinishMeasure(recordData) {//逆Filter,encodeWAV,exportWAV
                 var ir = getImpulseResponse(recordData);
-                for (m=0; m<= ir.length/2; m++){
-                    ir[ir.length-m] = 0;
+                ir2 = new Float32Array(N/2);
+                for (m=0; m< ir.length/2; m++){
+                    ir2[m] = ir[m];
                 }
                 var d = document.querySelectorAll('.download')[0];//downloadWAV
-                var wavurl = exportWAV(ir);
+                var wavurl = exportWAV(ir2);
                 d.download = 'ir.wav';
                 d.href = wavurl;
                 d.classList.remove('disabled');
@@ -225,13 +308,18 @@
                 measure.innerHTML = 'Start';
                 measure.value = false;
                 drawGraph(ir);
-                // console.log(ir);
-                return ir;
+                document.getElementById("irlink").style.display="block";
+                return ir2;
             }
 
             function exportWAV(audioData){
                 try{
-                    var buffer = new ArrayBuffer(44 + audioData.length * 2);//encodeWAV start
+                    var stereo = new Float32Array(audioData.length*2);
+                    for (s=0; s<audioData.length;s++){
+                        stereo[2*s] = audioData[s];
+                        stereo[2*s+1] = audioData[s];
+                    }
+                    var buffer = new ArrayBuffer(44 + stereo.length * 2);//encodeWAV start
                     var view = new DataView(buffer);
                     var writeString = function(view, offset, string) {
                         for (var i = 0; i < string.length; i++){
@@ -245,19 +333,19 @@
                         }
                     };
                     writeString(view, 0, 'RIFF');  // RIFFヘッダ
-                    view.setUint32(4, 32 + audioData.length * 2, true); // これ以降のファイルサイズ
+                    view.setUint32(4, 32 + stereo.length * 2, true); // これ以降のファイルサイズ
                     writeString(view, 8, 'WAVE'); // WAVEヘッダ
                     writeString(view, 12, 'fmt '); // fmtチャンク
                     view.setUint32(16, 16, true); // fmtチャンクのバイト数
                     view.setUint16(20, 1, true); // フォーマットID
-                    view.setUint16(22, 1, true); // チャンネル数
+                    view.setUint16(22, 2, true); // チャンネル数
                     view.setUint32(24, sampleRate, true); // サンプリングレート
                     view.setUint32(28, sampleRate * 2, true); // データ速度
                     view.setUint16(32, 2, true); // ブロックサイズ
                     view.setUint16(34, 16, true); // サンプルあたりのビット数
                     writeString(view, 36, 'data'); // dataチャンク
-                    view.setUint32(40, audioData.length * 2, true); // 波形データのバイト数
-                    floatTo16BitPCM(view, 44, audioData); // 波形データ    //encodeWAV end
+                    view.setUint32(40, stereo.length * 2, true); // 波形データのバイト数
+                    floatTo16BitPCM(view, 44, stereo); // 波形データ    //encodeWAV end
 
                     var audioBlob = new Blob([view], { type: 'audio/wav' });
                     var myURL = window.URL || window.webkitURL;
@@ -272,7 +360,6 @@
             function createPinktsp(N){
                 var freqr = new Float32Array(N);
                 var freqi = new Float32Array(N);
-
 
                 for (var k=1 ; k<=N/2 ; k++){
                     freqr[k] = Math.sqrt(1/k)*Math.cos(-a*k*Math.log(k));
@@ -309,7 +396,6 @@
                     shift=shift+D;
                 }
                 normalize(freqi);
-                // drawGraph(freqi);
                 freqi.shift = shift;
                 return freqi;
             }
@@ -374,6 +460,33 @@
                 canvasCtx.moveTo(width, center);
                 canvasCtx.lineTo(0, center);
                 canvasCtx.stroke();
+
+                strokeDottedLine(width/2,0,0,0);
+                strokeDottedLine(0,0,0,center*2);
+                strokeDottedLine(0,center*2,width/2,center*2);
+                strokeDottedLine(width/2,center*2,width/2, 0);
+
+                function strokeDottedLine(p1x, p1y, p2x, p2y) {
+                var d = Math.sqrt(Math.pow(p2x - p1x, 2) + Math.pow(p2y - p1y, 2));
+                var rad = Math.atan2(p2y - p1y, p2x - p1x);
+                var space = 5;
+                var dotted = Math.round(d / space / 2);
+
+                for (var i = 0; i < dotted; i++) {
+                  var p3x = Math.cos(rad) * space * (i * 2) + p1x;
+                  var p3y = Math.sin(rad) * space * (i * 2) + p1y;
+                  var p4x = Math.cos(rad) * space * (i * 2 + 1) + p1x;
+                  var p4y = Math.sin(rad) * space * (i * 2 + 1) + p1y;
+
+                  canvasCtx.strokeStyle = 'rgb(255, 0, 0)';
+                  canvasCtx.lineWidth	= 1;
+                  canvasCtx.lineJoin	= 'round';
+                  canvasCtx.beginPath();
+                  canvasCtx.moveTo(p3x, p3y);
+                  canvasCtx.lineTo(p4x, p4y);
+                  canvasCtx.stroke();
+                }
+              };
             }
 
             function soundplay(array){
@@ -401,22 +514,28 @@
 
             window.addEventListener('DOMContentLoaded', onDOMContentLoaded, false);
         })();
-
     </script>
 </head>
 
-<body>
+<body >
     <button id='measure'></button>
-    <button id='calib'></button>
+    <button id='calib'></button></br>
     <button id='playir'>PlayIR</button>
-    <form name="form1" id="id_form1" action="">
-    <p>Length of recording time : <input size ="1" name="recordlength"  type="text" value="2" />(1/16～32)</p>
-    <p>Number of recording times: <input size ="1" name="recordtimes"  type="text" value="3" /></p>
-    <p>Shift: <input size ="1" name="plusshift" type="text" value="100" /></p>
-    </form>
-    <p id='status'></p>
-    <p><a href="#" class="download disabled">Download IR WAV file</a></p>
-    <canvas id='graph'></canvas>
-</body>
+    <button id="playconv">Play</button></br>
+    <!-- <input id="file_select" type="file" multiple="multiple" /> -->
 
+    <form name="form1" id="id_form1" action="">
+    <p>Length of recording time (sec): <input size ="1" name="recordlength"  type="text" value="2" /></p>
+    <p>Number of recording times: <input size ="1" name="recordtimes"  type="text" value="6" /></p>
+    <p>Shift: <input size ="1" name="plusshift" type="text" value="500" /></p>
+    <p>Calib Frequency: <input size ="1" name="calibfreq" type="text" value="1000" /></p>
+    <p>sample file: <input size ="1" id ="samplefile" name="samplefile" type="text" value="guitar.wav" /></p>
+    ReverbLevel : <input type="range" id="revlevel" min="0" max="100" value="50" /><span id="revdisp">50</span>
+    </form>
+
+    <p id='status'></p>
+    <p><a href="#" class="download disabled" id="irlink">Download IR WAV file</a></p>
+    <canvas id='graph'></canvas>
+
+</body>
 </html>
