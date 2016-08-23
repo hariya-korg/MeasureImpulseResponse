@@ -102,11 +102,13 @@
                     this.value = value2;
                 }, false);
 
+                document.getElementById('load').addEventListener('click',function(event){
+                    files = [
+                        form_conv.samplefile.value,"ir3.wav"
+                    ];
+                    LoadBuffers();
+                },false);
 
-                files = [
-                    form1.samplefile.value,"ir3.wav"
-                ];
-                LoadBuffers();
 
                 document.getElementById('playir').addEventListener('click',function(event){
                     soundplay(ir);
@@ -114,7 +116,7 @@
 
                 document.getElementById('samplefile').addEventListener('change',function(event){
                     files = [
-                        form1.samplefile.value,"ir3.wav"
+                        form_conv.samplefile.value,"ir3.wav"
                     ];
                 },false);
 
@@ -134,7 +136,7 @@
                 calib.innerHTML =  'StopSine'
                 oscillator = audioCtx.createOscillator();
                 oscillator.type = 'sine';
-                oscillator.frequency.value =eval(form1.calibfreq.value);
+                oscillator.frequency.value =eval(form_calib.calibfreq.value);
                 oscillator.connect(audioCtx.destination);
                 oscillator.start();
                 navigator.getUserMedia = ( navigator.getUserMedia ||
@@ -196,7 +198,7 @@
                 measure.innerHTML = 'Stop';
                 document.getElementById("irlink").style.display="none";
 
-                N= Math.round(65536*4/3*eval(form1.recordlength.value));
+                N= Math.round(65536*4/3*eval(form_recordlength.recordlength.value));
                 console.log(N);
                 for (var b=1; b<20; b++){
                     if (Math.pow(2,b)<N && N<=Math.pow(2,b+1)){
@@ -209,7 +211,7 @@
                 a = J*Math.PI/(N/2)/Math.log(N/2);//計算式
                 try{
                     var recordData = new Float32Array(N);
-                    var repeat = eval(form1.recordtimes.value);//同期加算回数
+                    var repeat = eval(form_recordtimes.recordtimes.value);//同期加算回数
                     sampleRate = audioCtx.sampleRate;
                     navigator.getUserMedia = ( navigator.getUserMedia ||
                     navigator.webkitGetUserMedia ||
@@ -249,7 +251,7 @@
                                     }
                                 }
                             }
-                            var lag = 13300+eval(form1.plusshift.value);
+                            var lag = 13300+eval(form_plusshift.plusshift.value);
                             for (var i = 0; i < latency; i++){
                                 for (m=1; m<repeat;m++){
                                     if (N*m<= i+latency*(s+l*N/latency)-lag-shift
@@ -340,8 +342,8 @@
                     view.setUint16(20, 1, true); // フォーマットID
                     view.setUint16(22, 2, true); // チャンネル数
                     view.setUint32(24, sampleRate, true); // サンプリングレート
-                    view.setUint32(28, sampleRate * 2, true); // データ速度
-                    view.setUint16(32, 2, true); // ブロックサイズ
+                    view.setUint32(28, sampleRate * 2*2, true); // データ速度
+                    view.setUint16(32, 2*2, true); // ブロックサイズ
                     view.setUint16(34, 16, true); // サンプルあたりのビット数
                     writeString(view, 36, 'data'); // dataチャンク
                     view.setUint32(40, stereo.length * 2, true); // 波形データのバイト数
@@ -517,25 +519,45 @@
     </script>
 </head>
 
-<body >
-    <button id='measure'></button>
-    <button id='calib'></button></br>
-    <button id='playir'>PlayIR</button>
-    <button id="playconv">Play</button></br>
-    <!-- <input id="file_select" type="file" multiple="multiple" /> -->
+<body>
+    <p id='status'></p>
+    <table border="1" width="600" align="center" >
+    <tbody>
+    <tr>
+        <td>Calib Frequency(Hz)</td>
+        <td><form name="form_calib" id="form_calib" action=""><input size ="1" name="calibfreq" type="text" value="1000" /></form></td>
+        <td><button id='calib'></button></td>
+    </tr>
 
-    <form name="form1" id="id_form1" action="">
-    <p>Length of recording time (sec): <input size ="1" name="recordlength"  type="text" value="2" /></p>
-    <p>Number of recording times: <input size ="1" name="recordtimes"  type="text" value="6" /></p>
-    <p>Shift: <input size ="1" name="plusshift" type="text" value="500" /></p>
-    <p>Calib Frequency: <input size ="1" name="calibfreq" type="text" value="1000" /></p>
+    <tr>
+        <td>Length of recording time(sec)</td>
+        <td><form name="form_recordlength" id="form_recordlength" action="">
+            <input size ="1" name="recordlength"  type="text" value="2" /></form></td>
+        <td rowspan="3"><button id='measure' style = "WIDTH: 100px; HEIGHT: 50px"></button></td>
+    </tr>
+
+    <tr>
+        <td>Number of recording times</td>
+        <td><form name="form_recordtimes" id="form_recordtimes" action="">
+            <input size ="1" name="recordtimes"  type="text" value="6" /></form></td>
+    </tr>
+
+    <tr>
+        <td>IR start points shifting to left</td>
+        <td><form name="form_plusshift" id="form_plusshift" action="">
+            <input size ="1" name="plusshift" type="text" value="500" /></form></td>
+    </tr>
+    </tbody>
+    </table>
+    <!-- <input id="file_select" type="file" multiple="multiple" /> -->
+<button id='playir'>Play IR</button>   <button id="playconv">Convoluted Sound</button><button id="load">load file</button>
+<p><a href="#" class="download disabled" id="irlink">Download IR WAV file</a></p>
+<form name="form_conv" id="form_conv" action="">
     <p>sample file: <input size ="1" id ="samplefile" name="samplefile" type="text" value="guitar.wav" /></p>
     ReverbLevel : <input type="range" id="revlevel" min="0" max="100" value="50" /><span id="revdisp">50</span>
-    </form>
+</form>
 
-    <p id='status'></p>
-    <p><a href="#" class="download disabled" id="irlink">Download IR WAV file</a></p>
-    <canvas id='graph'></canvas>
+<canvas id='graph'></canvas>
 
 </body>
 </html>
