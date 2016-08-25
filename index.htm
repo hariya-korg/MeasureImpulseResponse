@@ -234,8 +234,7 @@
                         scriptNode = audioCtx.createScriptProcessor(latency);
                         var s=0;
                         var l=0;
-                        //  pinktsp[0]=1;
-                        //   shift=0;
+
                         scriptNode.onaudioprocess = function(audioProcessingEvent) {
                             var inputBuffer = audioProcessingEvent.inputBuffer;
                             var outputBuffer = audioProcessingEvent.outputBuffer;
