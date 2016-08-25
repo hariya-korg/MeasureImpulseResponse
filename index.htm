@@ -200,13 +200,11 @@
                 document.getElementById('reverb').style.display = 'none';
 
                 N= Math.round(65536*4/3*eval(form_recordlength.recordlength.value));
-                console.log(N);
                 for (var b=1; b<20; b++){
                     if (Math.pow(2,b)<N && N<=Math.pow(2,b+1)){
                         N = Math.pow(2,b+1);
                     }
                 }
-                console.log(N);
                 n=1;//0~1
                 J = Math.round(N/4*n)*2;//実効長
                 a = J*Math.PI/(N/2)/Math.log(N/2);//計算式
@@ -229,13 +227,14 @@
                         "optional": []
                     }}, function(stream) {
                         var pinktsp = createPinktsp(N);
+                        pinktsp[0]=0;
+                        pinktsp[N-1]=0;
                         var shift = pinktsp.shift;
                         var source = audioCtx.createMediaStreamSource(stream);
                         scriptNode = audioCtx.createScriptProcessor(latency);
                         var s=0;
                         var l=0;
-                        //  pinktsp[0]=1;
-                        //  shift=0;
+
                         scriptNode.onaudioprocess = function(audioProcessingEvent) {
                             var inputBuffer = audioProcessingEvent.inputBuffer;
                             var outputBuffer = audioProcessingEvent.outputBuffer;
@@ -253,6 +252,7 @@
                                 }
                             }
                             var lag = 13300+eval(form_plusshift.plusshift.value);
+
                             for (var i = 0; i < latency; i++){
                                 for (m=1; m<repeat;m++){
                                     if (N*m<= i+latency*(s+l*N/latency)-lag-shift
