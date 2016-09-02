@@ -5,20 +5,18 @@
     <meta charset='utf-8'></meta>
     <title>Measure Impulse Response</title>
     <link type='text/css' rel='stylesheet' href='style.css'></link>
-    <script type="text/javascript" src="fft.js"></script>
-    <script src="jquery-2.0.3.min.js"></script>
-    <script src="jquery.xdomainajax.js"></script>
+    <script type='text/javascript' src='fft.js'></script>
+    <script type='text/javascript' src='extendedDataView.js'></script>
     <script type='text/javascript'>
-
-
-        (function(){//wavのステレオ化、グラフの色指定、ダウンロードボタンの無効化、
-            var status,measure,calib;
+        (function(){
+            /* global variables */
+            var audioCtx = new(window.AudioContext || window.webkitAudioContext)();
+            var sampleRate = audioCtx.sampleRate;
+            var status, measure, calib;
             var N,n,j,a;
             var latency  = 4096;
-            var sampleRate;
             var ir;
             var scriptNode;
-            var audioCtx = new(window.AudioContext || window.webkitAudioContext)();
 
             var revlevel = audioCtx.createGain();
             revlevel.gain.value = 0.5;
@@ -100,46 +98,50 @@
                     this.value = value2;
                 }, false);
 
-                document.getElementById('downloadir').addEventListener('click',function(event){
+                document.getElementById('downloadir').addEventListener('click', function(event){
                     var a = document.createElement('a');
                     a.href = createWavURL(ir);
                     a.download = 'ir.wav';
                     a.click();
-                },false);
+                }, false);
 
-                document.getElementById('playir').addEventListener('click',function(event){
+                document.getElementById('playir').addEventListener('click', function(event){
                     var source = audioCtx.createBufferSource();
                     source.buffer = createAudioBuffer(ir);
                     source.connect(audioCtx.destination);
                     source.start();
-                },false);
+                }, false);
 
-                document.getElementById('playconv').addEventListener('click',function(event){
+                document.getElementById('playconv').addEventListener('click', function(event){
                     var source = audioCtx.createBufferSource();
                     source.connect(convolver);
                     loadAudioFile(document.getElementById('select').value, function(buffer){
                         source.buffer = buffer;
                         source.start();
+                        source = null;
                     }, audioCtx);
-                },false);
+                }, false);
 
-                document.getElementById('revlevel').addEventListener('change',function(event){
+                document.getElementById('revlevel').addEventListener('change', function(event){
                     var level = parseInt(this.value);
                     revlevel.gain.value = level * 0.01;
                     document.getElementById('revdisp').innerHTML = level;
-                },false);
+                }, false);
 
                 document.getElementById('reverb').style.display = 'none';
             }
 
-            var oscillator;
+            var tsp;
             function onStartCalib(){
                 calib.innerHTML =  'StopSine'
-                oscillator = audioCtx.createOscillator();
-                oscillator.type = 'sine';
-                oscillator.frequency.value =eval(form_calib.calibfreq.value);
-                oscillator.connect(audioCtx.destination);
-                oscillator.start();
+                tsp = audioCtx.createBufferSource();
+                tsp.loop = true;
+                tsp.connect(audioCtx.destination);
+                loadAudioFile('sound/tsp.wav', function(buffer){
+                    tsp.buffer = buffer;
+                    tsp.start();
+                }, audioCtx);
+
                 navigator.getUserMedia = ( navigator.getUserMedia ||
                 navigator.webkitGetUserMedia ||
                 navigator.mozGetUserMedia ||
@@ -162,23 +164,22 @@
                         var inputBuffer = audioProcessingEvent.inputBuffer;
                         for (var channel = 0; channel < inputBuffer.numberOfChannels; channel++) {
                             var inputData = inputBuffer.getChannelData(channel);
-                            var inputmax = Math.max.apply(null,inputData);
-                            var inputmin = Math.abs(Math.min.apply(null,inputData));
-                            if (inputmax<inputmin){
+                            var inputmax = Math.max.apply(null, inputData);
+                            var inputmin = Math.abs(Math.min.apply(null, inputData));
+                            if (inputmax < inputmin){
                                     inputmax = inputmin ;
                             }
                         }
-                        var maxdb = 20*Math.log10(inputmax);
-                        if(maxdb > -6){
-                            status.innerHTML='too large '+ Math.floor(maxdb) +'dB';
-                            status.style.color = "red";
-                        }else if(maxdb < -20){
-                            status.innerHTML='too small '+ Math.floor(maxdb) +'dB';
-                            status.style.color = "black";
-                        }
-                        else{
-                            status.innerHTML = 'proper '+ Math.floor(maxdb) +'dB';
-                            status.style.color = "green";
+                        var maxdb = 20 * Math.log10(inputmax);
+                        if (maxdb > -6.0) {
+                            status.innerHTML    = 'too large '+ Math.floor(maxdb) +'dB';
+                            status.style.color  = 'red';
+                        } else if (maxdb < -20.0) {
+                            status.innerHTML    = 'too small '+ Math.floor(maxdb) +'dB';
+                            status.style.color  = 'black';
+                        } else {
+                            status.innerHTML    = 'proper '+ Math.floor(maxdb) +'dB';
+                            status.style.color  = 'green';
                         }
                     }
                     source.connect(scriptNode);
@@ -190,105 +191,211 @@
                 status.innerHTML = 'Initialized';
                 status.style.color = "black";
                 calib.innerHTML =  'Calib'
-                oscillator.stop();
                 scriptNode.disconnect();
+                tsp.stop();
+                tsp = null;
             }
 
+            /* manage Pink TSP */
+            function createPinkTsp(length, ratio){
+                /* preprocess */
+                length = parseInt(length)|0;
+                if (ratio < 0.0) {
+                    ratio = 0.0;
+                } else if (ratio > 1.0) {
+                    ratio = 1.0;
+                }
+
+                var nyquist = (length >> 1)|0;
+                var effective = Math.round(nyquist * ratio * 0.5) * 2.0;        /* effective length */
+                var a = -Math.PI * effective / (nyquist * Math.log(nyquist));   /* a constant for phase */
+
+                var real = new Float32Array(length<<1>>1);
+                var imag = new Float32Array(length<<1>>1);
+
+                /* design Pink TSP in frequency domain */
+                var mag, phase, cos, sin;
+                real[0<<1>>1] = 1.0;
+                imag[0<<1>>1] = 0.0;
+                for (var k = (nyquist - 1)|0; (k|0) > (0|0); k = (k - 1)|0){
+                    mag     = Math.sqrt(1.0 / k);
+                    phase   = a * k * Math.log(k);
+                    cos     = mag * Math.cos(phase);
+                    sin     = mag * Math.sin(phase);
+
+                    real[k<<1>>1]           =  cos;
+                    imag[k<<1>>1]           =  sin;
+                    real[(length - k)|0]    =  cos;
+                    imag[(length - k)|0]    = -sin;
+                }
+                mag     = Math.sqrt(1.0 / nyquist);
+                phase   = a * nyquist * Math.log(nyquist);
+                real[nyquist<<1>>1] = mag * Math.cos(phase);
+                imag[nyquist<<1>>1] = mag * Math.sin(phase);
+
+                /* create signal in time domain */
+                var fft = new FFTNayukis(length<<1>>1);
+                fft.ifft(real, imag);
+
+                /* calculate shift */
+                var min = parseInt(Math.round(effective * (1.0 + (1.0 / Math.log(nyquist))) - length));
+                var shift = -1|0;
+                while ((real[(length + shift - 1)|0] < real[(length + shift)|0]) && ((shift|0) > (min|0))) {
+                    shift = (shift - 1)|0;
+                }
+                if ((shift|0) === (min|0)) {
+                    shift = 0|0;
+                    imag = real;
+                } else {
+                    /* shift the signal */
+                    for (var index = shift|0; (index|0) < (0|0); index = (index + 1)|0){
+                        imag[(index - shift)|0] = real[(index + length)|0];
+                    }
+                    for (var index = (length + shift - 1)|0; (index|0) >= (0|0); index = (index - 1)|0){
+                        imag[(index - shift)|0] = real[index<<1>>1];
+                    }
+                }
+                imag.shift = shift;
+
+                /* adjust the signal */
+                var offset = -0.5 * (imag[0<<1>>1] + imag[(length - 1)|0]);
+                normalize(imag, offset);
+
+                nyquist = null;
+                effective = null;
+                a = null;
+                real = null;
+
+                mag = null;
+                phase = null;
+                cos = null;
+                sin = null;
+
+                fft = null;
+                min = null;
+                shift = null;
+                offset = null;
+
+                return imag;
+            }
+
+            function getImpulseResponse(recordData){
+                var freqi = new Float32Array(N);
+                var ifreqr = new Float32Array(N);
+                var ifreqi = new Float32Array(N);
+                var fftn = new FFTNayukis(N);
+                fftn.fft(recordData,freqi);
+                for (var k=0; k<=N/2; k++) {
+                 ifreqr[k] = Math.sqrt(k)*(recordData[k]*Math.cos(a*k*Math.log(k))-freqi[k]*Math.sin(a*k*Math.log(k)));
+                 ifreqi[k] = Math.sqrt(k)*(recordData[k]*Math.sin(a*k*Math.log(k))+freqi[k]*Math.cos(a*k*Math.log(k)));
+                }
+                for (var k=N/2+1 ; k<N ; k++){
+                    ifreqr[k] = ifreqr[N-k];
+                    ifreqi[k] = -ifreqi[N-k];
+                }
+                 ifreqr[0]=1.0;
+                 ifreqi[0]=0;
+                fftn.ifft(ifreqr,ifreqi);
+                normalize(ifreqr);
+                return ifreqr;
+            }
+
+            /* meareu impulse response */
             function onStartMeasure() {
                 status.innerHTML = 'Measuring...';
                 measure.innerHTML = 'Stop';
                 document.getElementById('reverb').style.display = 'none';
 
-                N= Math.round(65536*4/3*eval(form_recordlength.recordlength.value));
-                for (var b=1; b<20; b++){
-                    if (Math.pow(2,b)<N && N<=Math.pow(2,b+1)){
-                        N = Math.pow(2,b+1);
-                    }
-                }
-                n=1;//0~1
-                J = Math.round(N/4*n)*2;//実効長
-                a = J*Math.PI/(N/2)/Math.log(N/2);//計算式
-                try{
-                    var recordData = new Float32Array(N);
-                    var repeat = eval(form_recordtimes.recordtimes.value);//同期加算回数
-                    sampleRate = audioCtx.sampleRate;
-                    navigator.getUserMedia = ( navigator.getUserMedia ||
+                /* calculate property of signal */
+                var second = parseFloat(document.getElementById('second').value);
+                var length = roundPower2(sampleRate * second);
+                var ratio = 1.0;
+                var signal = createPinkTsp(length<<1>>1, ratio);
+                downloadWavFromData([signal], sampleRate, 'pinktsp.wav');
+
+                second = null;
+                length = null;
+                ratio = null;
+                signal = null;
+                return;
+
+                var recordData = new Float32Array(length<<1>>1);
+                var repeat = eval(form_recordtimes.recordtimes.value);
+                navigator.getUserMedia = (
+                    navigator.getUserMedia ||
                     navigator.webkitGetUserMedia ||
                     navigator.mozGetUserMedia ||
-                    navigator.msGetUserMedia);
+                    navigator.msGetUserMedia
+                );
 
-                    navigator.getUserMedia ({audio: {
-                        "mandatory": {
-                            "googEchoCancellation": false,
-                            "googAutoGainControl": false,
-                            "googNoiseSuppression": false,
-                            "googHighpassFilter": false
-                        },
-                        "optional": []
-                    }}, function(stream) {
-                        var pinktsp = createPinktsp(N);
-                        pinktsp[0]=0;
-                        pinktsp[N-1]=0;
-                        var shift = pinktsp.shift;
-                        var source = audioCtx.createMediaStreamSource(stream);
-                        scriptNode = audioCtx.createScriptProcessor(latency);
-                        var s=0;
-                        var l=0;
+                navigator.getUserMedia ({audio: {
+                    'mandatory' : {
+                        'googEchoCancellation'  : false,
+                        'googAutoGainControl'   : false,
+                        'googNoiseSuppression'  : false,
+                        'googHighpassFilter'    : false
+                    },
+                    'optional': []
+                }}, function(stream) {
+                    var pinktsp = createPinkTsp(N);
+                    var shift = pinktsp.shift;
+                    var source = audioCtx.createMediaStreamSource(stream);
+                    scriptNode = audioCtx.createScriptProcessor(latency);
+                    var s=0;
+                    var l=0;
 
-                        scriptNode.onaudioprocess = function(audioProcessingEvent) {
-                            var inputBuffer = audioProcessingEvent.inputBuffer;
-                            var outputBuffer = audioProcessingEvent.outputBuffer;
-                            // Loop through the output channels (in this case there is only one)
-                            for (var channel = 0; channel < outputBuffer.numberOfChannels; channel++) {
-                                var inputData = inputBuffer.getChannelData(channel);
-                                var outputData = outputBuffer.getChannelData(channel);
-                                for (var sample = 0; sample < outputBuffer.length; sample++) {
-                                    // make output equal to the same as the input
-                                    if(s< N/latency){
-                                        outputData[sample] = pinktsp[sample+latency*s];
-                                    }else{
-                                        outputData[sample] = 0;
-                                    }
+                    scriptNode.onaudioprocess = function(audioProcessingEvent) {
+                        var inputBuffer = audioProcessingEvent.inputBuffer;
+                        var outputBuffer = audioProcessingEvent.outputBuffer;
+                        // Loop through the output channels (in this case there is only one)
+                        for (var channel = 0; channel < outputBuffer.numberOfChannels; channel++) {
+                            var inputData = inputBuffer.getChannelData(channel);
+                            var outputData = outputBuffer.getChannelData(channel);
+                            for (var sample = 0; sample < outputBuffer.length; sample++) {
+                                // make output equal to the same as the input
+                                if(s< N/latency){
+                                    outputData[sample] = pinktsp[sample+latency*s];
+                                }else{
+                                    outputData[sample] = 0;
                                 }
-                            }
-                            var lag = 13300+eval(form_plusshift.plusshift.value);
-
-                            for (var i = 0; i < latency; i++){
-                                for (m=1; m<repeat;m++){
-                                    if (N*m<= i+latency*(s+l*N/latency)-lag-shift
-                                    && i+latency*(s+l*N/latency)-lag-shift< N*(m+1)-shift){
-                                        var p =i+latency*(s+l*N/latency)-lag-N*m-shift;
-                                            recordData[p] += inputData[i];
-                                    } else if(N*m-shift<= i+latency*(s+l*N/latency)-lag-shift
-                                    && i+latency*(s+l*N/latency)-lag-shift< N*m){
-                                        var p =i+latency*(s+l*N/latency)-lag-N*m-shift+N;
-                                        recordData[p] += inputData[i];
-                                    }
-                                }
-                            }
-                            if (sample == latency && s< N/latency-1){
-                                s=s+1;
-                            }else if (sample == latency && s== N/latency-1 && l<repeat-1){
-                                s=0;
-                                l=l+1;
-                                //drawGraph(recordData);
-
-                            }else if (sample == latency && s< N/latency+5 && l==repeat-1){
-                                s=s+1;
-                            }else if (sample == latency && s== N/latency+5 && l==repeat-1){
-                                this.disconnect();
-                                normalize(recordData);
-                                drawGraph(recordData);
-                                ir = onFinishMeasure(recordData);
-                                convolver.buffer = createAudioBuffer(ir);
                             }
                         }
-                        source.connect(scriptNode);
-                        scriptNode.connect(audioCtx.destination);
-                    }, function(err){ alert("miss") });
-                }catch(e){
-                    status.innerHTML = 'Error : ' + e.message;
-                }
+                        var lag = 13300+eval(form_plusshift.plusshift.value);
+
+                        for (var i = 0; i < latency; i++){
+                            for (m=1; m<repeat;m++){
+                                if (N*m<= i+latency*(s+l*N/latency)-lag-shift
+                                && i+latency*(s+l*N/latency)-lag-shift< N*(m+1)-shift){
+                                    var p =i+latency*(s+l*N/latency)-lag-N*m-shift;
+                                        recordData[p] += inputData[i];
+                                } else if(N*m-shift<= i+latency*(s+l*N/latency)-lag-shift
+                                && i+latency*(s+l*N/latency)-lag-shift< N*m){
+                                    var p =i+latency*(s+l*N/latency)-lag-N*m-shift+N;
+                                    recordData[p] += inputData[i];
+                                }
+                            }
+                        }
+                        if (sample == latency && s< N/latency-1){
+                            s=s+1;
+                        }else if (sample == latency && s== N/latency-1 && l<repeat-1){
+                            s=0;
+                            l=l+1;
+                            //drawGraph(recordData);
+
+                        }else if (sample == latency && s< N/latency+5 && l==repeat-1){
+                            s=s+1;
+                        }else if (sample == latency && s== N/latency+5 && l==repeat-1){
+                            this.disconnect();
+                            normalize(recordData);
+                            drawGraph(recordData);
+                            ir = onFinishMeasure(recordData);
+                            convolver.buffer = createAudioBuffer(ir);
+                        }
+                    }
+
+                    source.connect(scriptNode);
+                    scriptNode.connect(audioCtx.destination);
+                }, alert(error));
             };
 
             function onStopMeasure() {
@@ -313,126 +420,103 @@
                 return ir2;
             }
 
-            function createWavURL(audioData){
-                try{
-                    var stereo = new Float32Array(audioData.length*2);
-                    for (s=0; s<audioData.length;s++){
-                        stereo[2*s] = audioData[s];
-                        stereo[2*s+1] = audioData[s];
-                    }
-                    var buffer = new ArrayBuffer(44 + stereo.length * 2);//encodeWAV start
-                    var view = new DataView(buffer);
-                    var writeString = function(view, offset, string) {
-                        for (var i = 0; i < string.length; i++){
-                            view.setUint8(offset + i, string.charCodeAt(i));
-                        }
-                    };
-                    var floatTo16BitPCM = function(output, offset, input) {
-                        for (var i = 0; i < input.length; i++, offset += 2){
-                            var s = Math.max(-1, Math.min(1, input[i]));
-                            output.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-                        }
-                    };
-                    writeString(view, 0, 'RIFF');  // RIFFヘッダ
-                    view.setUint32(4, 32 + stereo.length * 2, true); // これ以降のファイルサイズ
-                    writeString(view, 8, 'WAVE'); // WAVEヘッダ
-                    writeString(view, 12, 'fmt '); // fmtチャンク
-                    view.setUint32(16, 16, true); // fmtチャンクのバイト数
-                    view.setUint16(20, 1, true); // フォーマットID
-                    view.setUint16(22, 2, true); // チャンネル数
-                    view.setUint32(24, sampleRate, true); // サンプリングレート
-                    view.setUint32(28, sampleRate * 2*2, true); // データ速度
-                    view.setUint16(32, 2*2, true); // ブロックサイズ
-                    view.setUint16(34, 16, true); // サンプルあたりのビット数
-                    writeString(view, 36, 'data'); // dataチャンク
-                    view.setUint32(40, stereo.length * 2, true); // 波形データのバイト数
-                    floatTo16BitPCM(view, 44, stereo); // 波形データ    //encodeWAV end
-
-                    var audioBlob = new Blob([view], { type: 'audio/wav' });
-                    var myURL = window.URL || window.webkitURL;
-                    var url = myURL.createObjectURL(audioBlob);
-
-                    return url;
-                }catch(e){
-                    status.innerHTML = 'Error : ' + e.message;
+            /* utilities */
+            function roundPower2(value) {
+                var v = parseInt(Math.round(value));
+                value = 1|0;
+                while (v) {
+                    v = v >> 1;
+                    value = value << 1;
                 }
+                return value;
+            }
+
+            function normalize(array, offset){
+                var temp = array.slice(0);
+                temp.sort();
+                var max = temp[(temp.length - 1)|0] + offset;
+                var min = -(temp[0<<1>>1] + offset);
+                if (max < min) {
+                    max = min;
+                }
+
+                var normalize = 1.0 / max;
+                for (var index = (array.length - 1)|0; (index|0) >= (0|0); index = (index - 1)|0){
+                    array[index<<1>>1] = (array[index<<1>>1] + offset) * normalize;
+                }
+
+                temp = null;
+                max = null;
+                min = null;
+                normalize = null;
+            }
+
+            function downloadWavFromData(data, sampleRate, filename){
+                /* data is a 2-dimensional array and should have values between -1.0 and 1.0. */
+
+                /* preprocess */
+                if (!filename) {
+                    filename = 'JavaScript.wav';
+                }
+                sampleRate = parseInt(sampleRate);
+                var channel = data.length|0;
+                var length = data[0<<1>>1].length|0;
+
+                /* create interleaved data */
+                var id = new Float32Array((channel * length)|0);    /* interleaved data */
+                var cd;                                             /* channel data */
+                for (var c = (channel - 1)|0; (c|0) >= (0|0); c = (c - 1)|0) {
+                    cd = data[c<<1>>1];
+                    for (var l = (length - 1)|0; (l|0) >= (0|0); l = (l - 1)|0) {
+                        id[(channel * l + c)|0] = cd[l<<1>>1];
+                    }
+                }
+
+                /* create binary data */
+                var format = 1|0;   /* linear PCM */
+                var bit = 16|0;     /* This should be altered later. */
+                var block = ((bit >> 3) * channel)|0;
+                var size = (44 + length * block)|0;
+                var buffer = new ArrayBuffer(size<<1>>1);
+                var view = new ExtendedDataView(buffer);
+
+                view.setString( 0|0, 'RIFF');
+                view.setUint32( 4|0, (size - 8)|0, true);
+                view.setString( 8|0, 'WAVE');
+                view.setString(12|0, 'fmt ');
+                view.setUint32(16|0, 16|0, true);
+                view.setUint16(20|0, format|0, true);
+                view.setUint16(22|0, channel|0, true);
+                view.setUint32(24|0, sampleRate|0, true);
+                view.setUint32(28|0, (sampleRate * block)|0, true);
+                view.setUint16(32|0, block|0, true);
+                view.setUint16(34|0, bit|0, true);
+                view.setString(36|0, 'data');
+                view.setUint32(40|0, (size - 44)|0, true);
+                view.setFloat32ArrayAsInt16(44|0, id, true);
+
+                /* download the binary data */
+                var blob = new Blob([view], {type:'audio/wav'});
+                var a = document.createElement('a');
+                a.href = window.URL.createObjectURL(blob);
+                a.download = filename;
+                a.click();
+
+                channel = null;
+                length = null;
+                id = null;
+                cd = null;
+
+                format = null;
+                bit = null;
+                block = null;
+                size = null;
+                buffer = null;
+                view = null;
+
+                blob = null;
+                a = null;
             };
-
-            function createPinktsp(N){
-                var freqr = new Float32Array(N);
-                var freqi = new Float32Array(N);
-
-                for (var k=1 ; k<=N/2 ; k++){
-                    freqr[k] = Math.sqrt(1/k)*Math.cos(-a*k*Math.log(k));
-                    freqi[k] = Math.sqrt(1/k)*Math.sin(-a*k*Math.log(k));
-                }
-                for (var k=N/2+1 ; k<N ; k++){
-                    freqr[k] = freqr[N-k];
-                    freqi[k] = -freqi[N-k];
-                }
-                freqr[0] = 1.0;
-                freqi[0] = 0;
-
-                var fftn = new FFTNayukis(N);
-                fftn.ifft(freqr,freqi);
-
-                var shift =Math.round(N/2-J/2*(1+(1/Math.log(N/2))));
-                var D=1;
-                for (var q=1 ; q<10000 ; q++){
-                    if (D === 0) { break; }
-
-                    for (var n=0 ; n<shift ; n++){
-                        freqi[n]=freqr[n-shift+N];//freqiにfreqrをシフトしたものを入れる
-                    }
-                    for (var m=shift ; m<N ; m++){
-                        freqi[m]=freqr[m-shift];
-                    }
-
-                    var sample = 50;
-                    var D=sample-1;
-                    for (var l=1 ; l<sample ; l++){
-                         if(freqi[N-sample+l]<freqi[N-sample+l-1])
-                         D = sample-l-1;
-                    }
-                    shift=shift+D;
-                }
-                normalize(freqi);
-                freqi.shift = shift;
-                return freqi;
-            }
-
-            function getImpulseResponse(recordData){
-                var freqi = new Float32Array(N);
-                var ifreqr = new Float32Array(N);
-                var ifreqi = new Float32Array(N);
-                var fftn = new FFTNayukis(N);
-                fftn.fft(recordData,freqi);
-                for (var k=0; k<=N/2; k++) {
-                 ifreqr[k] = Math.sqrt(k)*(recordData[k]*Math.cos(a*k*Math.log(k))-freqi[k]*Math.sin(a*k*Math.log(k)));
-                 ifreqi[k] = Math.sqrt(k)*(recordData[k]*Math.sin(a*k*Math.log(k))+freqi[k]*Math.cos(a*k*Math.log(k)));
-                }
-                for (var k=N/2+1 ; k<N ; k++){
-                    ifreqr[k] = ifreqr[N-k];
-                    ifreqi[k] = -ifreqi[N-k];
-                }
-                 ifreqr[0]=1.0;
-                 ifreqi[0]=0;
-                fftn.ifft(ifreqr,ifreqi);
-                normalize(ifreqr);
-                return ifreqr;
-            }
-
-            function normalize(array){
-                var copy = array.slice(0);
-                copy.sort();
-                var max = copy[copy.length-1];
-                var min = Math.abs(copy[0]);
-                 if (max<min)
-                    max = min ;
-                for (var l=0 ; l<array.length ; l++){
-                    array[l]=array[l]/max;
-                }
-            }
 
             function drawGraph(array) {
                 var width = window.innerWidth * 0.8;
@@ -468,26 +552,26 @@
                 strokeDottedLine(width/2,center*2,width/2, 0);
 
                 function strokeDottedLine(p1x, p1y, p2x, p2y) {
-                var d = Math.sqrt(Math.pow(p2x - p1x, 2) + Math.pow(p2y - p1y, 2));
-                var rad = Math.atan2(p2y - p1y, p2x - p1x);
-                var space = 5;
-                var dotted = Math.round(d / space / 2);
+                    var d = Math.sqrt(Math.pow(p2x - p1x, 2) + Math.pow(p2y - p1y, 2));
+                    var rad = Math.atan2(p2y - p1y, p2x - p1x);
+                    var space = 5;
+                    var dotted = Math.round(d / space / 2);
 
-                for (var i = 0; i < dotted; i++) {
-                  var p3x = Math.cos(rad) * space * (i * 2) + p1x;
-                  var p3y = Math.sin(rad) * space * (i * 2) + p1y;
-                  var p4x = Math.cos(rad) * space * (i * 2 + 1) + p1x;
-                  var p4y = Math.sin(rad) * space * (i * 2 + 1) + p1y;
+                    for (var i = 0; i < dotted; i++) {
+                        var p3x = Math.cos(rad) * space * (i * 2) + p1x;
+                        var p3y = Math.sin(rad) * space * (i * 2) + p1y;
+                        var p4x = Math.cos(rad) * space * (i * 2 + 1) + p1x;
+                        var p4y = Math.sin(rad) * space * (i * 2 + 1) + p1y;
 
-                  canvasCtx.strokeStyle = 'rgb(255, 0, 0)';
-                  canvasCtx.lineWidth	= 1;
-                  canvasCtx.lineJoin	= 'round';
-                  canvasCtx.beginPath();
-                  canvasCtx.moveTo(p3x, p3y);
-                  canvasCtx.lineTo(p4x, p4y);
-                  canvasCtx.stroke();
-                }
-              };
+                        canvasCtx.strokeStyle = 'rgb(255, 0, 0)';
+                        canvasCtx.lineWidth	= 1;
+                        canvasCtx.lineJoin	= 'round';
+                        canvasCtx.beginPath();
+                        canvasCtx.moveTo(p3x, p3y);
+                        canvasCtx.lineTo(p4x, p4y);
+                        canvasCtx.stroke();
+                    }
+                };
             }
 
             window.addEventListener('DOMContentLoaded', onDOMContentLoaded, false);
@@ -506,10 +590,9 @@
             </tr>
 
             <tr>
-                <td>Length of recording time[sec]</td>
-                <td><form name="form_recordlength" id="form_recordlength" action="">
-                    <input size ="1" name="recordlength"  type="text" value="2" /></form></td>
-                <td rowspan="3"><button id='measure' style = "WIDTH: 100px; HEIGHT: 50px"></button></td>
+                <td>duration[sec]</td>
+                <td><input type='text' id='second' size='1' value='1.0'></input></td>
+                <td rowspan='3'><button id='measure' style="WIDTH: 100px; HEIGHT: 50px"></button></td>
             </tr>
 
             <tr>
