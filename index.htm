@@ -5,18 +5,18 @@
     <meta charset='utf-8'></meta>
     <title>Measure Impulse Response</title>
     <link type='text/css' rel='stylesheet' href='style.css'></link>
+    <script type='text/javascript' src='compatibility.js'></script>
     <script type='text/javascript' src='fft.js'></script>
+    <script type='text/javascript' src='pinktsp.js'></script>
     <script type='text/javascript' src='extendedDataView.js'></script>
     <script type='text/javascript'>
         (function(){
             /* global variables */
-            var audioCtx = new(window.AudioContext || window.webkitAudioContext)();
+            var audioCtx = new AudioContext();
             var sampleRate = audioCtx.sampleRate;
+            var latency = 4096;
             var status, measure, calib;
-            var N,n,j,a;
-            var latency  = 4096;
-            var ir;
-            var scriptNode;
+            var linear, full;
 
             var revlevel = audioCtx.createGain();
             revlevel.gain.value = 0.5;
@@ -98,31 +98,44 @@
                     this.value = value2;
                 }, false);
 
-                document.getElementById('downloadir').addEventListener('click', function(event){
-                    var a = document.createElement('a');
-                    a.href = createWavURL(ir);
-                    a.download = 'ir.wav';
-                    a.click();
+                document.getElementById('second').addEventListener('change', function(event) {
+                    if (parseFloat(this.value) < 0.1) {
+                        this.value = 0.1;
+                    }
                 }, false);
 
-                document.getElementById('playir').addEventListener('click', function(event){
+                document.getElementById('times').addEventListener('change', function(event) {
+                    if (parseInt(this.value) < 1) {
+                        this.value = 1;
+                    }
+                }, false);
+
+                document.getElementById('linearIR').addEventListener('click', function(event) {
+                    downloadWavFromData([linear], sampleRate, 'linear.wav');
+                }, false);
+
+                document.getElementById('fullIR').addEventListener('click', function(event) {
+                    downloadWavFromData([full], sampleRate, 'full.wav');
+                }, false);
+
+                document.getElementById('playIR').addEventListener('click', function(event) {
                     var source = audioCtx.createBufferSource();
-                    source.buffer = createAudioBuffer(ir);
+                    source.buffer = createAudioBuffer(linear);
                     source.connect(audioCtx.destination);
                     source.start();
                 }, false);
 
-                document.getElementById('playconv').addEventListener('click', function(event){
+                document.getElementById('playShot').addEventListener('click', function(event) {
                     var source = audioCtx.createBufferSource();
                     source.connect(convolver);
-                    loadAudioFile(document.getElementById('select').value, function(buffer){
+                    loadAudioFile(document.getElementById('select').value, function(buffer) {
                         source.buffer = buffer;
                         source.start();
                         source = null;
                     }, audioCtx);
                 }, false);
 
-                document.getElementById('revlevel').addEventListener('change', function(event){
+                document.getElementById('revlevel').addEventListener('change', function(event) {
                     var level = parseInt(this.value);
                     revlevel.gain.value = level * 0.01;
                     document.getElementById('revdisp').innerHTML = level;
@@ -142,10 +155,6 @@
                     tsp.start();
                 }, audioCtx);
 
-                navigator.getUserMedia = ( navigator.getUserMedia ||
-                navigator.webkitGetUserMedia ||
-                navigator.mozGetUserMedia ||
-                navigator.msGetUserMedia);
                 navigator.getUserMedia ({audio: {
                     "mandatory": {
                         "googEchoCancellation": false,
@@ -196,138 +205,9 @@
                 tsp = null;
             }
 
-            /* manage Pink TSP */
-            function createPinkTsp(length, ratio){
-                /* preprocess */
-                length = parseInt(length)|0;
-                if (ratio < 0.0) {
-                    ratio = 0.0;
-                } else if (ratio > 1.0) {
-                    ratio = 1.0;
-                }
-
-                var nyquist = (length >> 1)|0;
-                var effective = Math.round(nyquist * ratio * 0.5) * 2.0;        /* effective length */
-                var a = -Math.PI * effective / (nyquist * Math.log(nyquist));   /* a constant for phase */
-
-                var real = new Float32Array(length<<1>>1);
-                var imag = new Float32Array(length<<1>>1);
-
-                /* design Pink TSP in frequency domain */
-                var mag, phase, cos, sin;
-                real[0<<1>>1] = 1.0;
-                imag[0<<1>>1] = 0.0;
-                for (var k = (nyquist - 1)|0; (k|0) > (0|0); k = (k - 1)|0){
-                    mag     = Math.sqrt(1.0 / k);
-                    phase   = a * k * Math.log(k);
-                    cos     = mag * Math.cos(phase);
-                    sin     = mag * Math.sin(phase);
-
-                    real[k<<1>>1]           =  cos;
-                    imag[k<<1>>1]           =  sin;
-                    real[(length - k)|0]    =  cos;
-                    imag[(length - k)|0]    = -sin;
-                }
-                mag     = Math.sqrt(1.0 / nyquist);
-                phase   = a * nyquist * Math.log(nyquist);
-                real[nyquist<<1>>1] = mag * Math.cos(phase);
-                imag[nyquist<<1>>1] = mag * Math.sin(phase);
-
-                /* create signal in time domain */
-                var fft = new FFTNayukis(length<<1>>1);
-                fft.ifft(real, imag);
-
-                /* calculate shift */
-                var min = parseInt(Math.round(effective * (1.0 + (1.0 / Math.log(nyquist))) - length));
-                var shift = -1|0;
-                while ((real[(length + shift - 1)|0] < real[(length + shift)|0]) && ((shift|0) > (min|0))) {
-                    shift = (shift - 1)|0;
-                }
-                if ((shift|0) === (min|0)) {
-                    shift = 0|0;
-                    imag = real;
-                } else {
-                    /* shift the signal */
-                    for (var index = shift|0; (index|0) < (0|0); index = (index + 1)|0){
-                        imag[(index - shift)|0] = real[(index + length)|0];
-                    }
-                    for (var index = (length + shift - 1)|0; (index|0) >= (0|0); index = (index - 1)|0){
-                        imag[(index - shift)|0] = real[index<<1>>1];
-                    }
-                }
-                imag.shift = shift;
-
-                /* adjust the signal */
-                var offset = -0.5 * (imag[0<<1>>1] + imag[(length - 1)|0]);
-                normalize(imag, offset);
-
-                nyquist = null;
-                effective = null;
-                a = null;
-                real = null;
-
-                mag = null;
-                phase = null;
-                cos = null;
-                sin = null;
-
-                fft = null;
-                min = null;
-                shift = null;
-                offset = null;
-
-                return imag;
-            }
-
-            function getImpulseResponse(recordData){
-                var freqi = new Float32Array(N);
-                var ifreqr = new Float32Array(N);
-                var ifreqi = new Float32Array(N);
-                var fftn = new FFTNayukis(N);
-                fftn.fft(recordData,freqi);
-                for (var k=0; k<=N/2; k++) {
-                 ifreqr[k] = Math.sqrt(k)*(recordData[k]*Math.cos(a*k*Math.log(k))-freqi[k]*Math.sin(a*k*Math.log(k)));
-                 ifreqi[k] = Math.sqrt(k)*(recordData[k]*Math.sin(a*k*Math.log(k))+freqi[k]*Math.cos(a*k*Math.log(k)));
-                }
-                for (var k=N/2+1 ; k<N ; k++){
-                    ifreqr[k] = ifreqr[N-k];
-                    ifreqi[k] = -ifreqi[N-k];
-                }
-                 ifreqr[0]=1.0;
-                 ifreqi[0]=0;
-                fftn.ifft(ifreqr,ifreqi);
-                normalize(ifreqr);
-                return ifreqr;
-            }
-
             /* meareu impulse response */
+            var source, processor;
             function onStartMeasure() {
-                status.innerHTML = 'Measuring...';
-                measure.innerHTML = 'Stop';
-                document.getElementById('reverb').style.display = 'none';
-
-                /* calculate property of signal */
-                var second = parseFloat(document.getElementById('second').value);
-                var length = roundPower2(sampleRate * second);
-                var ratio = 1.0;
-                var signal = createPinkTsp(length<<1>>1, ratio);
-                downloadWavFromData([signal], sampleRate, 'pinktsp.wav');
-
-                second = null;
-                length = null;
-                ratio = null;
-                signal = null;
-                return;
-
-                var recordData = new Float32Array(length<<1>>1);
-                var repeat = eval(form_recordtimes.recordtimes.value);
-                navigator.getUserMedia = (
-                    navigator.getUserMedia ||
-                    navigator.webkitGetUserMedia ||
-                    navigator.mozGetUserMedia ||
-                    navigator.msGetUserMedia
-                );
-
                 navigator.getUserMedia ({audio: {
                     'mandatory' : {
                         'googEchoCancellation'  : false,
@@ -337,87 +217,167 @@
                     },
                     'optional': []
                 }}, function(stream) {
-                    var pinktsp = createPinkTsp(N);
-                    var shift = pinktsp.shift;
-                    var source = audioCtx.createMediaStreamSource(stream);
-                    scriptNode = audioCtx.createScriptProcessor(latency);
-                    var s=0;
-                    var l=0;
+                    /* change status */
+                    status.innerHTML = 'Measuring...';
+                    measure.innerHTML = 'Stop';
+                    document.getElementById('reverb').style.display = 'none';
 
-                    scriptNode.onaudioprocess = function(audioProcessingEvent) {
-                        var inputBuffer = audioProcessingEvent.inputBuffer;
-                        var outputBuffer = audioProcessingEvent.outputBuffer;
-                        // Loop through the output channels (in this case there is only one)
-                        for (var channel = 0; channel < outputBuffer.numberOfChannels; channel++) {
-                            var inputData = inputBuffer.getChannelData(channel);
-                            var outputData = outputBuffer.getChannelData(channel);
-                            for (var sample = 0; sample < outputBuffer.length; sample++) {
-                                // make output equal to the same as the input
-                                if(s< N/latency){
-                                    outputData[sample] = pinktsp[sample+latency*s];
-                                }else{
-                                    outputData[sample] = 0;
+                    /* calculate property of signal */
+                    var second = parseFloat(document.getElementById('second').value);
+                    var length = roundPower2(sampleRate * second * 2.0);
+                    var ratio = 1.0;
+                    var channel = 1|0;
+                    var times = parseInt(document.getElementById('times').value)|0;
+                    var offset = (5000 + parseInt(document.getElementById('offset').value))|0;
+
+                    source = audioCtx.createMediaStreamSource(stream);
+                    processor = audioCtx.createScriptProcessor(latency|0, channel|0, 1|0);
+
+                    var pinktsp = createPinkTsp(length<<1>>1, ratio);
+                    var modified = new Float32Array((length + latency)|0);
+                    for (var index = (length - 1)|0; (index|0) >= (0|0); index = (index - 1)|0) {
+                        modified[index<<1>>1] = pinktsp[index<<1>>1];
+                    }
+                    for (var index = (latency - 1)|0; (index|0) >= (0|0); index = (index - 1)|0) {
+                        modified[index<<1>>1] = pinktsp[(index + length)<<1>>1];
+                    }
+                    modified.position = 0|0;
+                    modified.shift = ((pinktsp.shift + offset) % length)|0;
+                    modified.a = pinktsp.a;
+                    processor.pinktsp = modified;
+
+                    var response = new Float32Array(length|0);
+                    response.position = -offset|0;
+                    response.times = times|0;
+                    response.take = -1|0;
+                    processor.response = response;
+
+                    processor.onaudioprocess = function(event) {
+                        /* set output data */
+                        var data = event.outputBuffer.getChannelData(0|0);
+                        var latency = data.length|0;
+
+                        var pinktsp = this.pinktsp;
+                        var length = (pinktsp.length - latency)|0;
+                        var position = pinktsp.position|0;
+
+                        for (var index = ((latency - 1)|0); (index|0) >= (0|0); index = (index - 1)|0) {
+                            data[index<<1>>1] = pinktsp[(position + index)|0];
+                        }
+                        pinktsp.position = ((position + latency) % length)|0;
+                        pinktsp = null;
+
+                        /* record input */
+                        data = event.inputBuffer.getChannelData(0<<1>>1);
+                        var response = this.response;
+                        position = response.position|0;
+                        var ppl = (position + latency)|0;
+                        var take = response.take|0;
+                        var tempi, tempv;
+                        if ((ppl|0) >= (length|0)) {
+                            var head = (ppl % length)|0;
+                            var tail = (latency - head)|0;
+                            take = (take + 1)|0;
+                            if ((take|0) === (0|0)) {
+                                for (var index = -head|0; (index|0) < (0|0); index = (index + 1)|0) {
+                                    tempi = (head + index)|0;
+                                    tempv = response[tempi<<1>>1] + data[(latency + index)|0];
+                                    response[tempi<<1>>1] = tempv;
+                                }
+                            } else if ((take|0) === (response.times|0)) {
+                                for (var index = (tail - 1)|0; (index|0) >= (0|0); index = (index - 1)|0) {
+                                    tempi = (position + index)|0;
+                                    tempv = response[tempi<<1>>1] + data[index<<1>>1];
+                                    response[tempi<<1>>1] = tempv;
+                                }
+                                setTimeout(onFinishMeasure, 0);
+                            } else if ((take|0) > (0|0)) {
+                                for (var index = -head|0; (index|0) < (0|0); index = (index + 1)|0) {
+                                    tempi = (head + index)|0;
+                                    tempv = response[tempi<<1>>1] + data[(latency + index)|0];
+                                    response[tempi<<1>>1] = tempv;
+                                }
+                                for (var index = (tail - 1)|0; (index|0) >= (0|0); index = (index - 1)|0) {
+                                    tempi = (position + index)|0;
+                                    tempv = response[tempi<<1>>1] + data[index<<1>>1];
+                                    response[tempi<<1>>1] = tempv;
                                 }
                             }
-                        }
-                        var lag = 13300+eval(form_plusshift.plusshift.value);
+                            ppl = head|0;
+                            response.take = take|0;
 
-                        for (var i = 0; i < latency; i++){
-                            for (m=1; m<repeat;m++){
-                                if (N*m<= i+latency*(s+l*N/latency)-lag-shift
-                                && i+latency*(s+l*N/latency)-lag-shift< N*(m+1)-shift){
-                                    var p =i+latency*(s+l*N/latency)-lag-N*m-shift;
-                                        recordData[p] += inputData[i];
-                                } else if(N*m-shift<= i+latency*(s+l*N/latency)-lag-shift
-                                && i+latency*(s+l*N/latency)-lag-shift< N*m){
-                                    var p =i+latency*(s+l*N/latency)-lag-N*m-shift+N;
-                                    recordData[p] += inputData[i];
-                                }
+                            tail = null;
+                            head = null;
+                        } else if (((take|0) >= (0|0)) && ((take|0) < (response.times|0))) {
+                            for (var index = (latency - 1)|0; (index|0) >= (0|0); index = (index - 1)|0) {
+                                tempi = (position + index)|0;
+                                tempv = response[tempi<<1>>1] + data[index<<1>>1];
+                                response[tempi<<1>>1] = tempv;
                             }
                         }
-                        if (sample == latency && s< N/latency-1){
-                            s=s+1;
-                        }else if (sample == latency && s== N/latency-1 && l<repeat-1){
-                            s=0;
-                            l=l+1;
-                            //drawGraph(recordData);
+                        response.position = ppl|0;
 
-                        }else if (sample == latency && s< N/latency+5 && l==repeat-1){
-                            s=s+1;
-                        }else if (sample == latency && s== N/latency+5 && l==repeat-1){
-                            this.disconnect();
-                            normalize(recordData);
-                            drawGraph(recordData);
-                            ir = onFinishMeasure(recordData);
-                            convolver.buffer = createAudioBuffer(ir);
-                        }
+                        data = null;
+                        latency = null;
+                        length = null;
+                        position = null;
+
+                        response = null;
+                        ppl = null;
+                        take = null;
+                        tempi = null;
+                        tempv = null;
                     }
 
-                    source.connect(scriptNode);
-                    scriptNode.connect(audioCtx.destination);
-                }, alert(error));
+                    source.connect(processor);
+                    processor.connect(audioCtx.destination);
+
+                    pinktsp = null;
+                    modified = null;
+                    response = null;
+                }, alert);
             };
 
             function onStopMeasure() {
+                clearAudio();
                 status.innerHTML = 'Interrupted';
                 measure.innerHTML = 'Start';
-                scriptNode.disconnect();
             }
 
-            function onFinishMeasure(recordData) {//逆Filter,encodeWAV,exportWAV
-                var ir = getImpulseResponse(recordData);
-                var ir2 = new Float32Array(N/2);
-                for (m=0; m< ir.length/2; m++){
-                    ir2[m] = ir[m];
-                }
+            function onFinishMeasure() {
+                var modified = processor.pinktsp;
+                var response = processor.response;
+                var pinktsp = new Float32Array(response.length|0);
+                pinktsp.shift = modified.shift;
+                pinktsp.a = modified.a;
 
+                clearAudio();
                 status.innerHTML = 'Finished';
                 measure.innerHTML = 'Start';
                 measure.value = false;
-                drawGraph(ir);
 
+                full = computeImpulseResponseFromPinkTsp(pinktsp, response);
+                linear = new Float32Array(full.length >> 1);
+                for (var index = (linear.length - 1); (index|0) >= (0|0); index = (index - 1)|0) {
+                    linear[index<<1>>1] = full[index<<1>>1];
+                }
+                convolver.buffer = createAudioBuffer(linear);
+                drawGraph(full);
                 document.getElementById('reverb').style.display = 'block';
-                return ir2;
+
+                modified = null;
+                response = null;
+                pinktsp = null;
+            }
+
+            function clearAudio() {
+                source.disconnect();
+                source = null;
+
+                processor.disconnect();
+                processor.pinktsp = null;
+                processor.response = null;
+                processor = null;
             }
 
             /* utilities */
@@ -431,27 +391,7 @@
                 return value;
             }
 
-            function normalize(array, offset){
-                var temp = array.slice(0);
-                temp.sort();
-                var max = temp[(temp.length - 1)|0] + offset;
-                var min = -(temp[0<<1>>1] + offset);
-                if (max < min) {
-                    max = min;
-                }
-
-                var normalize = 1.0 / max;
-                for (var index = (array.length - 1)|0; (index|0) >= (0|0); index = (index - 1)|0){
-                    array[index<<1>>1] = (array[index<<1>>1] + offset) * normalize;
-                }
-
-                temp = null;
-                max = null;
-                min = null;
-                normalize = null;
-            }
-
-            function downloadWavFromData(data, sampleRate, filename){
+            function downloadWavFromData(data, sampleRate, filename) {
                 /* data is a 2-dimensional array and should have values between -1.0 and 1.0. */
 
                 /* preprocess */
@@ -584,35 +524,31 @@
     <table border="1" width="600" align="center">
         <tbody>
             <tr>
-                <td>Calib Frequency[Hz]</td>
-                <td><form name="form_calib" id="form_calib" action=""><input size ="1" name="calibfreq" type="text" value="1000" /></form></td>
+                <td>Calibration</td>
+                <td>empty</td>
                 <td><button id='calib'></button></td>
             </tr>
-
             <tr>
-                <td>duration[sec]</td>
+                <td>IR Length [sec]</td>
                 <td><input type='text' id='second' size='1' value='1.0'></input></td>
                 <td rowspan='3'><button id='measure' style="WIDTH: 100px; HEIGHT: 50px"></button></td>
             </tr>
-
             <tr>
-                <td>Number of recording times</td>
-                <td><form name="form_recordtimes" id="form_recordtimes" action="">
-                    <input size ="1" name="recordtimes"  type="text" value="6" /></form></td>
+                <td>Synchronous Addition [times]</td>
+                <td><input type='text' id='times' size ='1' value='1'></input></td>
             </tr>
-
             <tr>
-                <td>IR start points shifting to left</td>
-                <td><form name="form_plusshift" id="form_plusshift" action="">
-                    <input size ="1" name="plusshift" type="text" value="500" /></form></td>
+                <td>Time Offset [samples]</td>
+                <td><input type='text' id='offset' size='1' value='0'></input></td>
             </tr>
         </tbody>
     </table>
     <div id='reverb'>
         <p>
-            <button id='downloadir'>Download IR</button>
-            <button id='playir'>Play IR</button>
-            <button id="playconv">Convoluted Sound</button>
+            <button id='linearIR'>Download Linear IR</button>
+            <button id='fullIR'>Download Full IR</button>
+            <button id='playIR'>Play IR</button>
+            <button id="playShot">Play One Shot</button>
             <select id='select'>
                 <option value='sound/clap.wav'>Clap</option>
                 <option value='sound/guitar.wav'>Guitar</option>

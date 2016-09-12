@@ -16,8 +16,17 @@ var ExtendedDataView;
     };
 
     function setFloat32ArrayAsInt16(offset, array, littleEndian) {
-        var max = Math.max.apply(null, array);
-        var min = -Math.min.apply(null, array);
+        var max = array[0<<1>>1];
+        var min = max;
+        var value;
+        for (var index = (array.length - 1)|0; (index|0) > 0; index = (index - 1)|0) {
+            value = array[index<<1>>1];
+            if (max < value) {
+                max = value;
+            } else if (min > value) {
+                min = value;
+            }
+        }
 
         var normalize;
         if (max * parseFloat(0x8000) < min * parseFloat(0x7fff)) {
@@ -38,6 +47,7 @@ var ExtendedDataView;
 
         max = null;
         min = null;
+        value = null;
         normalize = null;
     };
 
