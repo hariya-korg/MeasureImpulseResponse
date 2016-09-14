@@ -268,7 +268,7 @@
                     var channel = 1|0;
                     var times = parseInt(document.getElementById('times').value)|0;
                     var offset = (5000 + parseInt(document.getElementById('offset').value))|0;
-                    //offset = (offset + 50000)|0; /* should be deleted */
+                    offset = (offset + 50000)|0; /* should be deleted */
 
                     source = audioCtx.createMediaStreamSource(stream);
                     processor = audioCtx.createScriptProcessor(latency|0, channel|0, 1|0);
@@ -386,7 +386,7 @@
                 measure.innerHTML = 'Start';
                 measure.value = false;
 
-                //pinktsp.shift = ((pinktsp.shift + 30000) % pinktsp.length)|0; /* should be deleted */
+                pinktsp.shift = ((pinktsp.shift + 30000) % pinktsp.length)|0; /* should be deleted */
                 full = computeImpulseResponseFromPinkTsp(pinktsp, response);
                 var center = (full.length >> 1)|0;
                 linear = new Float32Array(center<<1>>1);
@@ -394,7 +394,8 @@
                     linear[index<<1>>1] = full[(index + center)<<1>>1];
                 }
                 center = null;
-                //linear = response; /* should be deleted */
+                linear = response; /* should be deleted */
+
                 convolver.buffer = createAudioBuffer(linear);
                 clearGraph();
                 drawGraph(full);

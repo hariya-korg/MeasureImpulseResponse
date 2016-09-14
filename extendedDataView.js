@@ -29,8 +29,8 @@ var ExtendedDataView;
         }
 
         var normalize;
-        if (max * parseFloat(0x8000) < min * parseFloat(0x7fff)) {
-            max = min;
+        if (max * parseFloat(0x8000) < -min * parseFloat(0x7fff)) {
+            max = -min;
             normalize = parseFloat(0x8000);
         } else {
             normalize = parseFloat(0x7fff);
