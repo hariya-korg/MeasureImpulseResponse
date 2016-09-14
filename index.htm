@@ -194,10 +194,10 @@
                         }
 
                         var db = 20.0 * Math.log10(max);
-                        if (db > -6.0) {
+                        if (db > -12.0) {
                             status.innerHTML    = 'too large '+ Math.floor(db) +'dB';
                             status.style.color  = 'red';
-                        } else if (db < -20.0) {
+                        } else if (db < -36.0) {
                             status.innerHTML    = 'too small '+ Math.floor(db) +'dB';
                             status.style.color  = 'black';
                         } else {
@@ -258,6 +258,7 @@
                     /* change status */
                     status.innerHTML = 'Measuring...';
                     measure.innerHTML = 'Stop';
+                    clearGraph();
                     document.getElementById('reverb').style.display = 'none';
 
                     /* calculate property of signal */
@@ -267,6 +268,7 @@
                     var channel = 1|0;
                     var times = parseInt(document.getElementById('times').value)|0;
                     var offset = (5000 + parseInt(document.getElementById('offset').value))|0;
+                    //offset = (offset + 50000)|0; /* should be deleted */
 
                     source = audioCtx.createMediaStreamSource(stream);
                     processor = audioCtx.createScriptProcessor(latency|0, channel|0, 1|0);
@@ -384,13 +386,17 @@
                 measure.innerHTML = 'Start';
                 measure.value = false;
 
+                //pinktsp.shift = ((pinktsp.shift + 30000) % pinktsp.length)|0; /* should be deleted */
                 full = computeImpulseResponseFromPinkTsp(pinktsp, response);
-                linear = new Float32Array(full.length >> 1);
-                for (var index = (linear.length - 1); (index|0) >= (0|0); index = (index - 1)|0) {
-                    linear[index<<1>>1] = full[index<<1>>1];
+                var center = (full.length >> 1)|0;
+                linear = new Float32Array(center<<1>>1);
+                for (var index = (center - 1)|0; (index|0) >= (0|0); index = (index - 1)|0) {
+                    linear[index<<1>>1] = full[(index + center)<<1>>1];
                 }
-                //linear = response;
+                center = null;
+                //linear = response; /* should be deleted */
                 convolver.buffer = createAudioBuffer(linear);
+                clearGraph();
                 drawGraph(full);
                 document.getElementById('reverb').style.display = 'block';
 
@@ -487,17 +493,24 @@
                 a = null;
             };
 
+            function clearGraph() {
+                var width = window.innerWidth * 0.8;
+                var height = window.innerHeight * 0.8;
+                document.getElementById('graph').getContext('2d').clearRect(0.0, 0.0, width, height);
+                width = null;
+                height = null;
+            }
+
             function drawGraph(array) {
                 var width = window.innerWidth * 0.8;
                 var height = window.innerHeight * 0.8;
-                var center = height * 0.4;
+                var center = height * 0.5;
                 var canvas = document.getElementById('graph');
                 canvas.setAttribute('width', width);
                 canvas.setAttribute('height', height);
                 var length = array.length;
                 var unit = width / (length - 1.0);
                 var canvasCtx = canvas.getContext('2d');
-                canvasCtx.clearRect(0.0, 0.0, width, height);
                 canvasCtx.strokeStyle = 'rgb(0, 0, 0)';
                 canvasCtx.lineWidth	= 1;
                 canvasCtx.lineJoin	= 'round';
@@ -515,10 +528,10 @@
                 canvasCtx.lineTo(0, center);
                 canvasCtx.stroke();
 
-                strokeDottedLine(width/2,0,0,0);
-                strokeDottedLine(0,0,0,center*2);
-                strokeDottedLine(0,center*2,width/2,center*2);
-                strokeDottedLine(width/2,center*2,width/2, 0);
+                strokeDottedLine(width * 0.5, 0.0, width, 0.0);
+                strokeDottedLine(width, 0.0, width, height);
+                strokeDottedLine(width * 0.5, height, width, height);
+                strokeDottedLine(width * 0.5, height, width * 0.5, 0.0);
 
                 function strokeDottedLine(p1x, p1y, p2x, p2y) {
                     var d = Math.sqrt(Math.pow(p2x - p1x, 2) + Math.pow(p2y - p1y, 2));
@@ -558,7 +571,7 @@
                 <td><button id='calib'></button></td>
             </tr>
             <tr>
-                <td>IR Length [sec]</td>
+                <td>Linear IR Length [sec]</td>
                 <td><input type='text' id='second' size='1' value='1.0'></input></td>
                 <td rowspan='3'><button id='measure' style="WIDTH: 100px; HEIGHT: 50px"></button></td>
             </tr>

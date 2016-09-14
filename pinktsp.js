@@ -88,7 +88,7 @@ var createPinkTsp, computeImpulseResponseFromPinkTsp;
     computeImpulseResponseFromPinkTsp = function(pinktsp, response) {
         var length = response.length|0;
         var nyquist = (length >> 1)|0;
-        var shift = pinktsp.shift;
+        var shift = ((pinktsp.shift + nyquist) % length)|0;
         var a = pinktsp.a;
 
         var real = new Float32Array(length<<1>>1);
