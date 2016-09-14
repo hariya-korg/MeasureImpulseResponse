@@ -110,6 +110,12 @@
                     }
                 }, false);
 
+                document.getElementById('offset').addEventListener('change', function(event) {
+                    if (parseInt(this.value) < -5000) {
+                        this.value = -5000;
+                    }
+                }, false);
+
                 document.getElementById('linearIR').addEventListener('click', function(event) {
                     downloadWavFromData([linear], sampleRate, 'linear.wav');
                 }, false);
@@ -144,65 +150,97 @@
                 document.getElementById('reverb').style.display = 'none';
             }
 
-            var tsp;
-            function onStartCalib(){
-                calib.innerHTML =  'StopSine'
-                tsp = audioCtx.createBufferSource();
-                tsp.loop = true;
-                tsp.connect(audioCtx.destination);
-                loadAudioFile('sound/tsp.wav', function(buffer){
-                    tsp.buffer = buffer;
-                    tsp.start();
+            /* calibration */
+            var looper, source1, processor1;
+            function onStartCalib() {
+                calib.innerHTML = 'Stop'
+                looper = audioCtx.createBufferSource();
+                looper.loop = true;
+                looper.connect(audioCtx.destination);
+                loadAudioFile('sound/tsp.wav', function(buffer) {
+                    looper.buffer = buffer;
+                    looper.start();
                 }, audioCtx);
 
                 navigator.getUserMedia ({audio: {
-                    "mandatory": {
+                    "mandatory" : {
                         "googEchoCancellation": false,
                         "googAutoGainControl": false,
                         "googNoiseSuppression": false,
                         "googHighpassFilter": false
                     },
-                    "optional": []
+                    "optional" : []
                 }}, function(stream) {
-                    var source = audioCtx.createMediaStreamSource(stream);
-                    var inputmax=0;
-                    var inputmin=0;
-                    scriptNode = audioCtx.createScriptProcessor(latency);
-                    scriptNode.onaudioprocess = function(audioProcessingEvent) {
-                        // The input buffer is the song we loaded earlier
-                        var inputBuffer = audioProcessingEvent.inputBuffer;
-                        for (var channel = 0; channel < inputBuffer.numberOfChannels; channel++) {
-                            var inputData = inputBuffer.getChannelData(channel);
-                            var inputmax = Math.max.apply(null, inputData);
-                            var inputmin = Math.abs(Math.min.apply(null, inputData));
-                            if (inputmax < inputmin){
-                                    inputmax = inputmin ;
+                    source1 = audioCtx.createMediaStreamSource(stream);
+                    processor1 = audioCtx.createScriptProcessor(latency|0, 1|0, 1|0);
+                    processor1.max = 0.0;
+                    processor1.count = 0|0;
+                    processor1.period = 1 << 16;
+                    processor1.onaudioprocess = function(event) {
+                        var data = event.inputBuffer.getChannelData(0<<1>>1);
+                        var length = data.length|0;
+                        var temp, max = this.max;
+                        var count = (this.count - length)|0;
+                        if ((count|0) <= (0|0)) {
+                            max = 0.0;
+                        }
+
+                        for (var index = (length - 1)|0; (index|0) >= (0|0); index = (index - 1)|0) {
+                            temp = Math.abs(data[index<<1>>1]);
+                            if (max < temp) {
+                                max = temp;
+                                count = 0|0;
                             }
                         }
-                        var maxdb = 20 * Math.log10(inputmax);
-                        if (maxdb > -6.0) {
-                            status.innerHTML    = 'too large '+ Math.floor(maxdb) +'dB';
+
+                        var db = 20.0 * Math.log10(max);
+                        if (db > -6.0) {
+                            status.innerHTML    = 'too large '+ Math.floor(db) +'dB';
                             status.style.color  = 'red';
-                        } else if (maxdb < -20.0) {
-                            status.innerHTML    = 'too small '+ Math.floor(maxdb) +'dB';
+                        } else if (db < -20.0) {
+                            status.innerHTML    = 'too small '+ Math.floor(db) +'dB';
                             status.style.color  = 'black';
                         } else {
-                            status.innerHTML    = 'proper '+ Math.floor(maxdb) +'dB';
+                            status.innerHTML    = 'proper '+ Math.floor(db) +'dB';
                             status.style.color  = 'green';
                         }
+
+                        if ((count|0) > (0|0)) {
+                            this.count = count|0;
+                        } else {
+                            this.count = this.period|0;
+                            this.max = max;
+                        }
+
+                        data = null;
+                        length = null;
+                        temp = null;
+                        max = null;
+                        count =null;
+                        db = null;
                     }
-                    source.connect(scriptNode);
-                    scriptNode.connect(audioCtx.destination);
-                },function(err){ alert("miss") });
+
+                    source1.connect(processor1);
+                    processor1.connect(audioCtx.destination);
+                }, alert);
             }
 
             function onStopCalib(){
                 status.innerHTML = 'Initialized';
                 status.style.color = "black";
                 calib.innerHTML =  'Calib'
-                scriptNode.disconnect();
-                tsp.stop();
-                tsp = null;
+
+                looper.disconnect();
+                looper = null;
+
+                source1.disconnect();
+                source1 = null;
+
+                processor1.disconnect();
+                processor1.max = null;
+                processor1.count = null;
+                processor1.period = null;
+                processor1 = null;
             }
 
             /* meareu impulse response */
@@ -234,17 +272,9 @@
                     processor = audioCtx.createScriptProcessor(latency|0, channel|0, 1|0);
 
                     var pinktsp = createPinkTsp(length<<1>>1, ratio);
-                    var modified = new Float32Array((length + latency)|0);
-                    for (var index = (length - 1)|0; (index|0) >= (0|0); index = (index - 1)|0) {
-                        modified[index<<1>>1] = pinktsp[index<<1>>1];
-                    }
-                    for (var index = (latency - 1)|0; (index|0) >= (0|0); index = (index - 1)|0) {
-                        modified[index<<1>>1] = pinktsp[(index + length)<<1>>1];
-                    }
-                    modified.position = 0|0;
-                    modified.shift = ((pinktsp.shift + offset) % length)|0;
-                    modified.a = pinktsp.a;
-                    processor.pinktsp = modified;
+                    pinktsp.position = 0|0;
+                    pinktsp.shift = ((pinktsp.shift + offset) % length)|0;
+                    processor.pinktsp = pinktsp;
 
                     var response = new Float32Array(length|0);
                     response.position = -offset|0;
@@ -258,10 +288,10 @@
                         var latency = data.length|0;
 
                         var pinktsp = this.pinktsp;
-                        var length = (pinktsp.length - latency)|0;
+                        var length = pinktsp.length|0;
                         var position = pinktsp.position|0;
 
-                        for (var index = ((latency - 1)|0); (index|0) >= (0|0); index = (index - 1)|0) {
+                        for (var index = (latency - 1)|0; (index|0) >= (0|0); index = (index - 1)|0) {
                             data[index<<1>>1] = pinktsp[(position + index)|0];
                         }
                         pinktsp.position = ((position + latency) % length)|0;
@@ -273,34 +303,31 @@
                         position = response.position|0;
                         var ppl = (position + latency)|0;
                         var take = response.take|0;
-                        var tempi, tempv;
+                        var temp;
                         if ((ppl|0) >= (length|0)) {
                             var head = (ppl % length)|0;
                             var tail = (latency - head)|0;
                             take = (take + 1)|0;
+
                             if ((take|0) === (0|0)) {
                                 for (var index = -head|0; (index|0) < (0|0); index = (index + 1)|0) {
-                                    tempi = (head + index)|0;
-                                    tempv = response[tempi<<1>>1] + data[(latency + index)|0];
-                                    response[tempi<<1>>1] = tempv;
+                                    temp = (head + index)|0;
+                                    response[temp<<1>>1] = response[temp<<1>>1] + data[(latency + index)|0];
                                 }
                             } else if ((take|0) === (response.times|0)) {
                                 for (var index = (tail - 1)|0; (index|0) >= (0|0); index = (index - 1)|0) {
-                                    tempi = (position + index)|0;
-                                    tempv = response[tempi<<1>>1] + data[index<<1>>1];
-                                    response[tempi<<1>>1] = tempv;
+                                    temp = (position + index)|0;
+                                    response[temp<<1>>1] = response[temp<<1>>1] + data[index<<1>>1];
                                 }
                                 setTimeout(onFinishMeasure, 0);
                             } else if ((take|0) > (0|0)) {
-                                for (var index = -head|0; (index|0) < (0|0); index = (index + 1)|0) {
-                                    tempi = (head + index)|0;
-                                    tempv = response[tempi<<1>>1] + data[(latency + index)|0];
-                                    response[tempi<<1>>1] = tempv;
-                                }
                                 for (var index = (tail - 1)|0; (index|0) >= (0|0); index = (index - 1)|0) {
-                                    tempi = (position + index)|0;
-                                    tempv = response[tempi<<1>>1] + data[index<<1>>1];
-                                    response[tempi<<1>>1] = tempv;
+                                    temp = (position + index)|0;
+                                    response[temp<<1>>1] = response[temp<<1>>1] + data[index<<1>>1];
+                                }
+                                for (var index = -head|0; (index|0) < (0|0); index = (index + 1)|0) {
+                                    temp = (head + index)|0;
+                                    response[temp<<1>>1] = response[temp<<1>>1] + data[(latency + index)|0];
                                 }
                             }
                             ppl = head|0;
@@ -310,9 +337,8 @@
                             head = null;
                         } else if (((take|0) >= (0|0)) && ((take|0) < (response.times|0))) {
                             for (var index = (latency - 1)|0; (index|0) >= (0|0); index = (index - 1)|0) {
-                                tempi = (position + index)|0;
-                                tempv = response[tempi<<1>>1] + data[index<<1>>1];
-                                response[tempi<<1>>1] = tempv;
+                                temp = (position + index)|0;
+                                response[temp<<1>>1] = response[temp<<1>>1] + data[index<<1>>1];
                             }
                         }
                         response.position = ppl|0;
@@ -325,15 +351,20 @@
                         response = null;
                         ppl = null;
                         take = null;
-                        tempi = null;
-                        tempv = null;
+                        temp = null;
                     }
 
                     source.connect(processor);
                     processor.connect(audioCtx.destination);
 
+                    second = null;
+                    length = null;
+                    ratio = null;
+                    channel = null;
+                    times = null;
+                    offset = null;
+
                     pinktsp = null;
-                    modified = null;
                     response = null;
                 }, alert);
             };
@@ -345,11 +376,8 @@
             }
 
             function onFinishMeasure() {
-                var modified = processor.pinktsp;
+                var pinktsp = processor.pinktsp;
                 var response = processor.response;
-                var pinktsp = new Float32Array(response.length|0);
-                pinktsp.shift = modified.shift;
-                pinktsp.a = modified.a;
 
                 clearAudio();
                 status.innerHTML = 'Finished';
@@ -361,6 +389,7 @@
                 for (var index = (linear.length - 1); (index|0) >= (0|0); index = (index - 1)|0) {
                     linear[index<<1>>1] = full[index<<1>>1];
                 }
+                //linear = response;
                 convolver.buffer = createAudioBuffer(linear);
                 drawGraph(full);
                 document.getElementById('reverb').style.display = 'block';
