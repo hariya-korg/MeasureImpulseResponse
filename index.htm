@@ -18,150 +18,9 @@
             var status, measure, calib;
             var linear, full;
 
-            var revlevel = audioCtx.createGain();
-            revlevel.gain.value = 0.5;
-            revlevel.connect(audioCtx.destination);
-
-            var convolver = audioCtx.createConvolver();
-            convolver.connect(revlevel);
-
-            function createAudioBuffer(array) {
-                var channels = 2;
-                var length = array.length;
-                var buffer = audioCtx.createBuffer(channels, length, audioCtx.sampleRate);
-                for (var channel = (channels - 1)|0; (channel|0) >= (0|0); channel = (channel - 1)|0) {
-                    var data = buffer.getChannelData(channel);
-                    for (var index = (length - 1)|0; (index|0) >= (0|0); index = (index - 1)|0) {
-                        data[index<<1>>1] = array[index<<1>>1];
-                    }
-                }
-                return buffer;
-            }
-
-            function loadAudioFile(url, onload, audio_ctx) {
-                /* load buffer asynchronously */
-                var request = new XMLHttpRequest();
-                request.open('GET', url, true);
-                request.responseType = 'arraybuffer';
-
-                request.onload = function() {
-                    /* decode audio data asynchronously in request.response */
-                    audio_ctx.decodeAudioData(
-                        request.response,
-                        function(buffer) {
-                            if (!buffer) {
-                                alert('error in decoding audio data : ' + url);
-                                return;
-                            }
-                            onload(buffer);
-                        },
-                        function(error) {
-                            console.error('error in decodeAudioData (loadAudioFile)', error);
-                        }
-                    );
-                }
-
-                request.onerror = function(error) {
-                    alert('error in loadAudioFile', error);
-                }
-
-                request.send();
-            }
-
-            function onDOMContentLoaded() {
-                status = document.getElementById('status');
-                measure = document.getElementById('measure');
-                calib = document.getElementById('calib');
-
-                status.innerHTML = 'Initialized';
-                measure.innerHTML = 'Start';
-                measure.value = false;
-                measure.addEventListener('click', function(event) {
-                    var value = this.value == 'false';
-                    if (value) {
-                        onStartMeasure();
-                    } else {
-                        onStopMeasure();
-                    }
-                    this.value = value;
-                }, false);
-
-                calib.innerHTML = 'Calib';
-                calib.value = false;
-                calib.addEventListener('click', function(event) {
-                    var value2 = this.value == 'false';
-                    if (value2) {
-                        onStartCalib();
-                    } else {
-                        onStopCalib();
-                    }
-                    this.value = value2;
-                }, false);
-
-                document.getElementById('second').addEventListener('change', function(event) {
-                    if (parseFloat(this.value) < 0.1) {
-                        this.value = 0.1;
-                    }
-                }, false);
-
-                document.getElementById('times').addEventListener('change', function(event) {
-                    if (parseInt(this.value) < 1) {
-                        this.value = 1;
-                    }
-                }, false);
-
-                document.getElementById('offset').addEventListener('change', function(event) {
-                    if (parseInt(this.value) < -5000) {
-                        this.value = -5000;
-                    }
-                }, false);
-
-                document.getElementById('linearIR').addEventListener('click', function(event) {
-                    downloadWavFromData([linear], sampleRate, 'linear.wav');
-                }, false);
-
-                document.getElementById('fullIR').addEventListener('click', function(event) {
-                    downloadWavFromData([full], sampleRate, 'full.wav');
-                }, false);
-
-                document.getElementById('playIR').addEventListener('click', function(event) {
-                    var source = audioCtx.createBufferSource();
-                    source.buffer = createAudioBuffer(linear);
-                    source.connect(audioCtx.destination);
-                    source.start();
-                }, false);
-
-                document.getElementById('playShot').addEventListener('click', function(event) {
-                    var source = audioCtx.createBufferSource();
-                    source.connect(convolver);
-                    loadAudioFile(document.getElementById('select').value, function(buffer) {
-                        source.buffer = buffer;
-                        source.start();
-                        source = null;
-                    }, audioCtx);
-                }, false);
-
-                document.getElementById('revlevel').addEventListener('change', function(event) {
-                    var level = parseInt(this.value);
-                    revlevel.gain.value = level * 0.01;
-                    document.getElementById('revdisp').innerHTML = level;
-                }, false);
-
-                document.getElementById('reverb').style.display = 'none';
-            }
-
             /* calibration */
             var looper, source1, processor1;
             function onStartCalib() {
-                calib.innerHTML = 'Stop'
-                looper = audioCtx.createBufferSource();
-                looper.loop = true;
-                looper.connect(audioCtx.destination);
-                loadAudioFile('sound/tsp.wav', function(buffer) {
-                    looper.buffer = buffer;
-                    looper.start();
-                }, audioCtx);
-
                 navigator.getUserMedia ({audio: {
                     "mandatory" : {
                         "googEchoCancellation": false,
@@ -171,6 +30,15 @@
                     },
                     "optional" : []
                 }}, function(stream) {
+                    calib.innerHTML = 'Stop'
+                    looper = audioCtx.createBufferSource();
+                    looper.loop = true;
+                    looper.connect(audioCtx.destination);
+                    loadAudioFile('sound/tsp.wav', function(buffer) {
+                        looper.buffer = buffer;
+                        looper.start();
+                    }, audioCtx);
+
                     source1 = audioCtx.createMediaStreamSource(stream);
                     processor1 = audioCtx.createScriptProcessor(latency|0, 1|0, 1|0);
                     processor1.max = 0.0;
@@ -243,7 +111,7 @@
                 processor1 = null;
             }
 
-            /* meareu impulse response */
+            /* measure impulse response */
             var source, processor;
             function onStartMeasure() {
                 navigator.getUserMedia ({audio: {
@@ -268,7 +136,7 @@
                     var channel = 1|0;
                     var times = parseInt(document.getElementById('times').value)|0;
                     var offset = (5000 + parseInt(document.getElementById('offset').value))|0;
-                    offset = (offset + 50000)|0; /* should be deleted */
+                    // offset = (offset + 50000)|0; /* should be deleted */
 
                     source = audioCtx.createMediaStreamSource(stream);
                     processor = audioCtx.createScriptProcessor(latency|0, channel|0, 1|0);
@@ -386,15 +254,14 @@
                 measure.innerHTML = 'Start';
                 measure.value = false;
 
-                pinktsp.shift = ((pinktsp.shift + 30000) % pinktsp.length)|0; /* should be deleted */
+                // pinktsp.shift = ((pinktsp.shift + 30000) % pinktsp.length)|0; /* should be deleted */
                 full = computeImpulseResponseFromPinkTsp(pinktsp, response);
                 var center = (full.length >> 1)|0;
                 linear = new Float32Array(center<<1>>1);
                 for (var index = (center - 1)|0; (index|0) >= (0|0); index = (index - 1)|0) {
                     linear[index<<1>>1] = full[(index + center)<<1>>1];
                 }
-                center = null;
-                linear = response; /* should be deleted */
+                // linear = response; /* should be deleted */
 
                 convolver.buffer = createAudioBuffer(linear);
                 clearGraph();
@@ -404,6 +271,7 @@
                 modified = null;
                 response = null;
                 pinktsp = null;
+                center = null;
             }
 
             function clearAudio() {
@@ -416,6 +284,14 @@
                 processor = null;
             }
 
+            /* reverb */
+            var revlevel = audioCtx.createGain();
+            revlevel.gain.value = 0.5;
+            revlevel.connect(audioCtx.destination);
+
+            var convolver = audioCtx.createConvolver();
+            convolver.connect(revlevel);
+
             /* utilities */
             function roundPower2(value) {
                 var v = parseInt(Math.round(value));
@@ -425,6 +301,50 @@
                     value = value << 1;
                 }
                 return value;
+            }
+
+            function createAudioBuffer(array) {
+                var channels = 2;
+                var length = array.length;
+                var buffer = audioCtx.createBuffer(channels, length, audioCtx.sampleRate);
+                for (var channel = (channels - 1)|0; (channel|0) >= (0|0); channel = (channel - 1)|0) {
+                    var data = buffer.getChannelData(channel);
+                    for (var index = (length - 1)|0; (index|0) >= (0|0); index = (index - 1)|0) {
+                        data[index<<1>>1] = array[index<<1>>1];
+                    }
+                }
+                return buffer;
+            }
+
+            function loadAudioFile(url, onload, audio_ctx) {
+                /* load buffer asynchronously */
+                var request = new XMLHttpRequest();
+                request.open('GET', url, true);
+                request.responseType = 'arraybuffer';
+
+                request.onload = function() {
+                    /* decode audio data asynchronously in request.response */
+                    audio_ctx.decodeAudioData(
+                        this.response,
+                        function(buffer) {
+                            if (!buffer) {
+                                alert('error in decoding audio data : ' + url);
+                                return;
+                            }
+                            onload(buffer);
+                        },
+                        function(error) {
+                            console.error('error in decodeAudioData (loadAudioFile)', error);
+                        }
+                    );
+                }
+
+                request.onerror = function(error) {
+                    alert('error in loadAudioFile', error);
+                }
+
+                request.send();
+                request = null;
             }
 
             function downloadWavFromData(data, sampleRate, filename) {
@@ -494,14 +414,6 @@
                 a = null;
             };
 
-            function clearGraph() {
-                var width = window.innerWidth * 0.8;
-                var height = window.innerHeight * 0.8;
-                document.getElementById('graph').getContext('2d').clearRect(0.0, 0.0, width, height);
-                width = null;
-                height = null;
-            }
-
             function drawGraph(array) {
                 var width = window.innerWidth * 0.8;
                 var height = window.innerHeight * 0.8;
@@ -509,52 +421,171 @@
                 var canvas = document.getElementById('graph');
                 canvas.setAttribute('width', width);
                 canvas.setAttribute('height', height);
+
                 var length = array.length;
                 var unit = width / (length - 1.0);
-                var canvasCtx = canvas.getContext('2d');
-                canvasCtx.strokeStyle = 'rgb(0, 0, 0)';
-                canvasCtx.lineWidth	= 1;
-                canvasCtx.lineJoin	= 'round';
-                canvasCtx.beginPath();
-                canvasCtx.moveTo(width, center * (1.0 - array[(length - 1)|0]));
+                var context = canvas.getContext('2d');
+                context.lineWidth	= 1;
+                context.lineJoin	= 'round';
+
+                /* draw array */
+                context.strokeStyle = 'rgb(0, 0, 0)';
+                context.beginPath();
+                context.moveTo(width, center * (1.0 - array[(length - 1)|0]));
                 for (var index = (length - 2)|0; index >=0; index = (index - 1)|0) {
-                    canvasCtx.lineTo(unit * index, center * (1.0 - array[index<<1>>1]));
+                    context.lineTo(unit * index, center * (1.0 - array[index<<1>>1]));
                 }
-                canvasCtx.stroke();
-                canvasCtx.strokeStyle = 'rgb(0, 0, 255)';
-                canvasCtx.lineWidth	= 1;
-                canvasCtx.lineJoin	= 'round';
-                canvasCtx.beginPath();
-                canvasCtx.moveTo(width, center);
-                canvasCtx.lineTo(0, center);
-                canvasCtx.stroke();
+                context.stroke();
 
-                strokeDottedLine(width * 0.5, 0.0, width, 0.0);
-                strokeDottedLine(width, 0.0, width, height);
-                strokeDottedLine(width * 0.5, height, width, height);
-                strokeDottedLine(width * 0.5, height, width * 0.5, 0.0);
+                /* draw a horizontal axis*/
+                context.strokeStyle = 'rgb(0, 0, 255)';
+                context.beginPath();
+                context.moveTo(width, center);
+                context.lineTo(0, center);
+                context.stroke();
 
-                function strokeDottedLine(p1x, p1y, p2x, p2y) {
-                    var d = Math.sqrt(Math.pow(p2x - p1x, 2) + Math.pow(p2y - p1y, 2));
-                    var rad = Math.atan2(p2y - p1y, p2x - p1x);
-                    var space = 5;
-                    var dotted = Math.round(d / space / 2);
+                /* draw a rectangle */
+                center = width * 0.5;
+                context.strokeStyle = 'rgb(255, 0, 0)';
+                context.strokeDottedLine(center, 0.0, width, 0.0);
+                context.strokeDottedLine(width, 0.0, width, height);
+                context.strokeDottedLine(width * 0.5, height, width, height);
+                context.strokeDottedLine(width * 0.5, height, center, 0.0);
 
-                    for (var i = 0; i < dotted; i++) {
-                        var p3x = Math.cos(rad) * space * (i * 2) + p1x;
-                        var p3y = Math.sin(rad) * space * (i * 2) + p1y;
-                        var p4x = Math.cos(rad) * space * (i * 2 + 1) + p1x;
-                        var p4y = Math.sin(rad) * space * (i * 2 + 1) + p1y;
+                width = null;
+                height = null;
+                center = null;
+                canvas = null;
 
-                        canvasCtx.strokeStyle = 'rgb(255, 0, 0)';
-                        canvasCtx.lineWidth	= 1;
-                        canvasCtx.lineJoin	= 'round';
-                        canvasCtx.beginPath();
-                        canvasCtx.moveTo(p3x, p3y);
-                        canvasCtx.lineTo(p4x, p4y);
-                        canvasCtx.stroke();
+                length = null;
+                unit = null;
+                context = null;
+            }
+
+            function strokeDottedLine(x1, y1, x2, y2) {
+                var dx = x2 - x1, dy = y2 - y1;
+                var d = Math.sqrt(dx * dx + dy * dy);
+                var rad = Math.atan2(dy, dx);
+                var cos = Math.cos(rad), sin = Math.sin(rad);
+                var space = 5.0;
+                var dotted = Math.round(d * 0.5 / space);
+
+                var x3, y3, x4, y4;
+                for (var index = (dotted - 1)|0; (index|0) >= (0|0); index = (index - 1)|0) {
+                    x3 = cos * space * parseFloat(index << 1) + x1;
+                    y3 = sin * space * parseFloat(index << 1) + y1;
+                    x4 = cos * space * parseFloat(((index << 1) + 1)|0) + x1;
+                    y4 = sin * space * parseFloat(((index << 1) + 1)|0) + y1;
+
+                    this.beginPath();
+                    this.moveTo(x3, y3);
+                    this.lineTo(x4, y4);
+                    this.stroke();
+                }
+
+                dx = null;
+                dy = null;
+                d = null;
+                rad = null;
+                cos = null;
+                sin = null;
+                space = null;
+                dotted = null;
+
+                x3 = null;
+                y3 = null;
+                x4 = null;
+                y4 = null;
+            };
+
+            function clearGraph() {
+                document.getElementById('graph').getContext('2d').clearRect(
+                    0.0, 0.0, window.innerWidth * 0.8, window.innerHeight * 0.8);
+            }
+
+            /* DOMContentLoaded */
+            function onDOMContentLoaded() {
+                status = document.getElementById('status');
+                measure = document.getElementById('measure');
+                calib = document.getElementById('calib');
+
+                status.innerHTML = 'Initialized';
+                measure.innerHTML = 'Start';
+                measure.value = false;
+                measure.addEventListener('click', function(event) {
+                    var value = this.value == 'false';
+                    if (value) {
+                        onStartMeasure();
+                    } else {
+                        onStopMeasure();
                     }
-                };
+                    this.value = value;
+                }, false);
+
+                calib.innerHTML = 'Calib';
+                calib.value = false;
+                calib.addEventListener('click', function(event) {
+                    var value2 = this.value == 'false';
+                    if (value2) {
+                        onStartCalib();
+                    } else {
+                        onStopCalib();
+                    }
+                    this.value = value2;
+                }, false);
+
+                document.getElementById('second').addEventListener('change', function(event) {
+                    if (parseFloat(this.value) < 0.1) {
+                        this.value = 0.1;
+                    }
+                }, false);
+
+                document.getElementById('times').addEventListener('change', function(event) {
+                    if (parseInt(this.value) < 1) {
+                        this.value = 1;
+                    }
+                }, false);
+
+                document.getElementById('offset').addEventListener('change', function(event) {
+                    if (parseInt(this.value) < -5000) {
+                        this.value = -5000;
+                    }
+                }, false);
+
+                document.getElementById('linearIR').addEventListener('click', function(event) {
+                    downloadWavFromData([linear], sampleRate, 'linear.wav');
+                }, false);
+
+                document.getElementById('fullIR').addEventListener('click', function(event) {
+                    downloadWavFromData([full], sampleRate, 'full.wav');
+                }, false);
+
+                document.getElementById('playIR').addEventListener('click', function(event) {
+                    var source = audioCtx.createBufferSource();
+                    source.buffer = createAudioBuffer(linear);
+                    source.connect(audioCtx.destination);
+                    source.start();
+                }, false);
+
+                document.getElementById('playShot').addEventListener('click', function(event) {
+                    var source = audioCtx.createBufferSource();
+                    source.connect(convolver);
+                    loadAudioFile(document.getElementById('select').value, function(buffer) {
+                        source.buffer = buffer;
+                        source.start();
+                        source = null;
+                    }, audioCtx);
+                }, false);
+
+                document.getElementById('revlevel').addEventListener('change', function(event) {
+                    var level = parseInt(this.value);
+                    revlevel.gain.value = level * 0.01;
+                    document.getElementById('revdisp').innerHTML = level;
+                }, false);
+
+                document.getElementById('graph').getContext('2d').strokeDottedLine = strokeDottedLine;
+
+                document.getElementById('reverb').style.display = 'none';
             }
 
             window.addEventListener('DOMContentLoaded', onDOMContentLoaded, false);
