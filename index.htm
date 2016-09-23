@@ -15,7 +15,6 @@
             var audioCtx = new AudioContext();
             var sampleRate = audioCtx.sampleRate;
             var latency = 4096;
-            var status, measure, calib;
             var linear, full;
 
             /* calibration */
@@ -30,7 +29,7 @@
                     },
                     "optional" : []
                 }}, function(stream) {
-                    calib.innerHTML = 'Stop'
+                    document.getElementById('calib').innerHTML = 'Stop'
                     looper = audioCtx.createBufferSource();
                     looper.loop = true;
                     looper.connect(audioCtx.destination);
@@ -62,6 +61,7 @@
                         }
 
                         var db = 20.0 * Math.log10(max);
+                        var status = document.getElementById('status');
                         if (db > -12.0) {
                             status.innerHTML    = 'too large '+ Math.floor(db) +'dB';
                             status.style.color  = 'red';
@@ -86,6 +86,7 @@
                         max = null;
                         count =null;
                         db = null;
+                        status = null;
                     }
 
                     source1.connect(processor1);
@@ -94,9 +95,11 @@
             }
 
             function onStopCalib(){
+                var status = document.getElementById('status');
                 status.innerHTML = 'Initialized';
                 status.style.color = "black";
-                calib.innerHTML =  'Calib'
+                document.getElementById('calib').innerHTML =  'Calib'
+                status = null;
 
                 looper.disconnect();
                 looper = null;
@@ -124,8 +127,8 @@
                     'optional': []
                 }}, function(stream) {
                     /* change status */
-                    status.innerHTML = 'Measuring...';
-                    measure.innerHTML = 'Stop';
+                    document.getElementById('status').innerHTML = 'Measuring...';
+                    document.getElementById('measure').innerHTML = 'Stop';
                     clearGraph();
                     document.getElementById('reverb').style.display = 'none';
 
@@ -241,8 +244,8 @@
 
             function onStopMeasure() {
                 clearAudio();
-                status.innerHTML = 'Interrupted';
-                measure.innerHTML = 'Start';
+                document.getElementById('status').innerHTML = 'Interrupted';
+                document.getElementById('measure').innerHTML = 'Start';
             }
 
             function onFinishMeasure() {
@@ -250,9 +253,12 @@
                 var response = processor.response;
 
                 clearAudio();
-                status.innerHTML = 'Finished';
+
+                var measure = document.getElementById('measure');
+                document.getElementById('status').innerHTML = 'Finished';
                 measure.innerHTML = 'Start';
                 measure.value = false;
+                measure = null;
 
                 // pinktsp.shift = ((pinktsp.shift + 30000) % pinktsp.length)|0; /* should be deleted */
                 full = computeImpulseResponseFromPinkTsp(pinktsp, response);
@@ -505,11 +511,9 @@
 
             /* DOMContentLoaded */
             function onDOMContentLoaded() {
-                status = document.getElementById('status');
-                measure = document.getElementById('measure');
-                calib = document.getElementById('calib');
+                document.getElementById('status').innerHTML = 'Initialized';
 
-                status.innerHTML = 'Initialized';
+                var measure = document.getElementById('measure');
                 measure.innerHTML = 'Start';
                 measure.value = false;
                 measure.addEventListener('click', function(event) {
@@ -521,7 +525,9 @@
                     }
                     this.value = value;
                 }, false);
+                measure = null;
 
+                var calib = document.getElementById('calib');
                 calib.innerHTML = 'Calib';
                 calib.value = false;
                 calib.addEventListener('click', function(event) {
@@ -533,7 +539,8 @@
                     }
                     this.value = value2;
                 }, false);
-
+                calib = null;
+                
                 document.getElementById('second').addEventListener('change', function(event) {
                     if (parseFloat(this.value) < 0.1) {
                         this.value = 0.1;
@@ -599,7 +606,7 @@
         <tbody>
             <tr>
                 <td>Calibration</td>
-                <td>empty</td>
+                <td></td>
                 <td><button id='calib'></button></td>
             </tr>
             <tr>
